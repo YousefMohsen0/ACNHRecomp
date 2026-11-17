@@ -36,6 +36,7 @@ jobs:
 
       - name: Regenerate embedded frame generation shaders
         run: |
+          export PATH="$ANDROID_HOME/ndk/28.2.13676358/shader-tools/linux-x86_64:$PATH"
           python3 tools/gen_spirv_inc.py runtime/src/nvn/nvn_framegen_spirv.inc \
             kFgLuma=tools/shaders/framegen/luma.comp \
             kFgSearch=tools/shaders/framegen/search.comp \
