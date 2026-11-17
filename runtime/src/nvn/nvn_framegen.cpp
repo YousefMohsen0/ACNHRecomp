@@ -328,7 +328,8 @@ bool framegen_frame_begin(uint64_t now_ns) {
     g.period_ns = (g.period_ns * 7 + clamped) / 8;
     // Faster than ~45 fps there is nothing to fill in. Slower than 20 fps (a heavy scene, loading, a hitch) the frames
     // are shown as they come: the two are far apart, and waiting between them would hold up the replay of the next.
-    return dt > 22'000'000 && dt < 50'000'000;
+    // Include exactly 50 ms: that is 20 fps, not slower than 20 fps. The strict comparison dropped FG at this boundary.
+    return dt > 22'000'000 && dt <= 50'000'000;
 }
 
 uint64_t framegen_real_delay_ns() { return std::clamp<uint64_t>(g.period_ns / 2, 8'000'000, 25'000'000); }
