@@ -53,8 +53,21 @@ jobs:
           curl -fsSL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.357.tar.gz \
             | tar -xz --strip-components=1 -C private/third_party/Vulkan-Headers-1.4.357
 
+      - name: Fetch settings UI dependency
+        run: |
+          mkdir -p private/third_party/imgui
+          curl -fsSL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9.tar.gz \
+            | tar -xz --strip-components=1 -C private/third_party/imgui
+
       - name: Build app APK without game files
         run: tools/build_android.sh --no-game --jobs 2
+
+      - name: Verify settings UI was compiled
+        run: |
+          if grep -q 'Dear ImGui not found' private/acnh/apk-app.cmake.log; then
+            cat private/acnh/apk-app.cmake.log
+            exit 1
+          fi
 
       - name: Record build identity
         run: |
