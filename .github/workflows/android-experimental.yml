@@ -1,0 +1,71 @@
+name: Experimental Android APK
+
+on:
+  push:
+    branches: [phone-mali-framegen]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android arm64 APK (game files excluded)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+
+      - name: Regenerate embedded frame generation shaders
+        run: |
+          python3 tools/gen_spirv_inc.py runtime/src/nvn/nvn_framegen_spirv.inc \
+            kFgLuma=tools/shaders/framegen/luma.comp \
+            kFgSearch=tools/shaders/framegen/search.comp \
+            kFgSmooth=tools/shaders/framegen/smooth.comp \
+            kFgSynth=tools/shaders/framegen/synth.comp \
+            kFgBlend=tools/shaders/framegen/blend.comp
+
+      - name: Install host tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang zip unzip zstd
+
+      - name: Fetch Vulkan headers
+        run: |
+          mkdir -p private/third_party/Vulkan-Headers-1.4.357
+          curl -fsSL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.357.tar.gz \
+            | tar -xz --strip-components=1 -C private/third_party/Vulkan-Headers-1.4.357
+
+      - name: Build app APK without game files
+        run: tools/build_android.sh --no-game --jobs 2
+
+      - name: Record build identity
+        run: |
+          cp private/acnh/apk-app/acnh.apk private/acnh/apk-app/ACNHRecomp-experimental.apk
+          sha256sum private/acnh/apk-app/ACNHRecomp-experimental.apk > private/acnh/apk-app/SHA256SUMS.txt
+          git rev-parse HEAD > private/acnh/apk-app/COMMIT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ACNHRecomp-experimental-android-arm64
+          path: |
+            private/acnh/apk-app/ACNHRecomp-experimental.apk
+            private/acnh/apk-app/SHA256SUMS.txt
+            private/acnh/apk-app/COMMIT.txt
+            runtime/src/nvn/nvn_framegen_spirv.inc
+          if-no-files-found: error
+          retention-days: 14

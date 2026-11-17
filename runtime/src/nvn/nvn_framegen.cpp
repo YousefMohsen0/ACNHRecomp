@@ -37,7 +37,7 @@ namespace {
 
 #include "nvn_framegen_spirv.inc"
 
-enum Pass { kLuma, kSearch, kSmooth, kSynth, kPassCount };
+enum Pass { kLuma, kSearch, kSmooth, kSynth, kBlend, kPassCount };
 
 struct Push {
     int32_t size[4];
@@ -47,7 +47,7 @@ struct Push {
 constexpr uint32_t kStamps = 4, kTimingSlots = 8;
 
 struct State {
-    bool tried = false, ok = false;
+    bool tried = false, ok = false, fast_blend = false;
     VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkPipeline pipes[kPassCount] = {};
@@ -118,6 +118,21 @@ void all_images(GpuImage* (&out)[kImageCount]) {
     out[n++] = &g.gen, out[n++] = &g.fine, out[n++] = &g.unmatched;
 }
 
+void destroy_resources() {
+    VkDevice d = vk_device();
+    for (VkPipeline& p : g.pipes) {
+        if (p) p_vkDestroyPipeline(d, p, nullptr), p = VK_NULL_HANDLE;
+    }
+    if (g.queries) p_vkDestroyQueryPool(d, g.queries, nullptr), g.queries = VK_NULL_HANDLE;
+    if (g.layout) p_vkDestroyPipelineLayout(d, g.layout, nullptr), g.layout = VK_NULL_HANDLE;
+    if (g.set_layout) p_vkDestroyDescriptorSetLayout(d, g.set_layout, nullptr), g.set_layout = VK_NULL_HANDLE;
+    if (g.sampler) p_vkDestroySampler(d, g.sampler, nullptr), g.sampler = VK_NULL_HANDLE;
+    GpuImage* imgs[kImageCount];
+    all_images(imgs);
+    for (GpuImage* i : imgs) destroy_image(*i);
+    g.w = g.h = 0;
+}
+
 uint32_t div_up(uint32_t a, uint32_t b) { return (a + b - 1) / b; }
 
 // The images for a w x h picture (made again when the presented size changes).
@@ -146,6 +161,7 @@ bool make_images(uint32_t w, uint32_t h, VkFormat format) {
     ok = ok && make_image(g.unmatched, VK_FORMAT_R32_UINT, 1, 1, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     if (!ok) {
         log("nvn/fg: images for %ux%u could not be made: frame generation off", w, h);
+        for (GpuImage* i : imgs) destroy_image(*i);
         return false;
     }
     g.w = w, g.h = h;
@@ -181,11 +197,16 @@ bool init() {
     pli.setLayoutCount = 1, pli.pSetLayouts = &g.set_layout;
     pli.pushConstantRangeCount = 1, pli.pPushConstantRanges = &push;
     if (p_vkCreatePipelineLayout(d, &pli, nullptr, &g.layout) != VK_SUCCESS) return false;
+    VkPhysicalDeviceProperties props{};
+    p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
+    // Mali (ARM's Vulkan vendor ID) benefits from the single-pass midpoint more than the multi-pass motion search.
+    g.fast_blend = props.vendorID == 0x13B5;
+    if (g.fast_blend) log("nvn/fg: Mali fast blend path (lower GPU cost; more motion ghosting)");
     struct Code {
         const uint32_t* words;
         size_t bytes;
     } code[kPassCount] = {{kFgLuma, sizeof kFgLuma}, {kFgSearch, sizeof kFgSearch}, {kFgSmooth, sizeof kFgSmooth},
-                          {kFgSynth, sizeof kFgSynth}};
+                          {kFgSynth, sizeof kFgSynth}, {kFgBlend, sizeof kFgBlend}};
     for (int k = 0; k < kPassCount; k++) {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         mi.codeSize = code[k].bytes, mi.pCode = code[k].words;
@@ -206,8 +227,6 @@ bool init() {
     p_vkGetPhysicalDeviceQueueFamilyProperties(vk_physical(), &n, families.data());
     uint32_t bits = vk_queue_family() < n ? families[vk_queue_family()].timestampValidBits : 0;
     if (bits) {
-        VkPhysicalDeviceProperties props{};
-        p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
         g.tick_ns = props.limits.timestampPeriod;
         g.ts_mask = bits >= 64 ? ~0ull : (1ull << bits) - 1;
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -222,7 +241,10 @@ bool ready() {
     if (!g.tried) {
         g.tried = true;
         g.ok = init();
-        if (!g.ok) log("nvn/fg: frame generation unavailable: frames are presented as the game makes them");
+        if (!g.ok) {
+            destroy_resources();
+            log("nvn/fg: frame generation unavailable: frames are presented as the game makes them");
+        }
     }
     return g.ok;
 }
@@ -326,10 +348,9 @@ bool framegen_frame_begin(uint64_t now_ns) {
     // generated one.
     uint64_t clamped = std::clamp<uint64_t>(dt, 20'000'000, 50'000'000);
     g.period_ns = (g.period_ns * 7 + clamped) / 8;
-    // Faster than ~45 fps there is nothing to fill in. Slower than 20 fps (a heavy scene, loading, a hitch) the frames
-    // are shown as they come: the two are far apart, and waiting between them would hold up the replay of the next.
-    // Include exactly 50 ms: that is 20 fps, not slower than 20 fps. The strict comparison dropped FG at this boundary.
-    return dt > 22'000'000 && dt <= 50'000'000;
+    // Faster than ~45 fps there is little to fill in. Keep generation enabled at any slower rate, including heavy
+    // scenes and hitches; the generated frame may be less useful when the real frames are far apart.
+    return dt > 22'000'000;
 }
 
 uint64_t framegen_real_delay_ns() { return std::clamp<uint64_t>(g.period_ns / 2, 8'000'000, 25'000'000); }
@@ -367,6 +388,23 @@ GpuImage* framegen_record(VkCommandBuffer cb, uint64_t texture, GpuImage& src, b
     for (GpuImage* i : imgs) transition(cb, *i, VK_IMAGE_LAYOUT_GENERAL);
     transition(cb, src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     const uint32_t w = g.w, h = g.h;
+    if (g.fast_blend) {
+        g.cur = cur;
+        g.have_prev = true;
+        g.have_field = false;
+        if (!generate) return nullptr;
+        transition(cb, *last, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        stamp(cb, 1, timed);
+        stamp(cb, 2, timed);
+        Push blend{};
+        blend.size[0] = int32_t(w), blend.size[1] = int32_t(h);
+        dispatch(cb, kBlend, {{0, last}, {1, &src}, {4, &g.gen}}, blend, div_up(w, 8), div_up(h, 8));
+        stamp(cb, 3, timed);
+        if (timed) g.slot_used[g.slot] = true, g.slot = (g.slot + 1) % kTimingSlots;
+        if (++g.generated == 1) log("nvn/fg: first fast in-between frame (%ux%u)", w, h);
+        if (prev) *prev = last;
+        return &g.gen;
+    }
     GpuImage(&L)[4] = g.luma[cur];
     GpuImage(&P)[4] = g.luma[old];
     Push p{};

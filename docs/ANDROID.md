@@ -140,7 +140,7 @@ Open **ACNH Recomp** on the phone. The first start takes a minute or two: shader
 
 | Setting | Default on Android | Notes |
 |---|---|---|
-| Frame generation | Off | built-in: the game's 30 fps shown at 60, ~4 ms more GPU a frame, warmer, and what moves past something else smears every other picture (no motion vectors from the game) |
+| Frame generation | Off | built-in: the game's 30 fps shown at 60, ~4 ms more GPU a frame, warmer, and what moves past something else smears every other picture (no motion vectors from the game). In the experimental phone branch it stays active below 20 fps too. Mali uses a cheaper one-pass blend (more motion ghosting) to reduce the GPU cost; frame generation cannot make the game's simulation run faster. |
 | Resolution | Auto | the rows the GPU keeps at 30 fps (900 on an Adreno 650) |
 | Upscaling | AMD FSR 1 | from those rows to the screen; bilinear is a little cheaper and softer |
 | Aspect | Auto | the phone's own shape (20:9), HUD at the edges |
