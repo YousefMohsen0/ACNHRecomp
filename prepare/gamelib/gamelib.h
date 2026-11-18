@@ -42,8 +42,8 @@ struct Options {
     std::string work;         // where the objects go (deleted when done)
     std::string target;       // a Target name
     std::string opt = "-O2";  // the optimisation level: -O2, fast, -O0 (gamelib.cpp: opt_flags)
-    // With a hot list for this game (prepare/gamelib/hot/<build id>.txt, by main's build id) only its functions are
-    // built at opt, the rest at "fast" (about a third quicker to compile; the game spends almost no time there).
+    // With a hot list for this game, its profiled functions get this level; the rest keep opt.
+    std::string hot_opt = "-O3";
     std::string build_id;
     bool split = true;
     unsigned jobs = 0;        // 0: the cores, as many as the memory holds

@@ -63,10 +63,9 @@ const Embedded kRuntime[] = {
 #include "gamelib_data.inc"
 };
 
-// The functions the game spends its time in, per game (main's build id): "<module> <offset in hex>" lines, from
-// ACNHRecomp's CPU profiles of the game played (the Importer's tools/make_hot_list.py; prepare/gamelib/hot/<build
-// id>.txt, built in as gamelib_hot.inc by CMake; none so far). Only how fast the code is depends on it, never what it
-// does.
+// The functions the game spends its time in, per game (main's build id): "<module> <offset in hex>" lines from
+// CPU profiles. They get the hot optimization level; all other functions keep the normal level. Only code speed
+// depends on this list, never behavior.
 struct HotList {
     const char* build_id;
     const char* text;
@@ -530,6 +529,7 @@ unsigned default_jobs() {
 //         code as compact.
 //   -O2:  what ACNHRecomp's own build uses.  -O0: debugging only (about 8 times the code).
 std::vector<std::string> opt_flags(const std::string& opt) {
+    if (opt == "-O3") return {"-O3"};
     if (opt == "fast")
         return {"-O2", "-Xclang", "-O1", "-mllvm", "-fast-isel=true", "-mllvm", "-enable-misched=false",
                 "-fno-slp-vectorize", "-fno-vectorize"};
@@ -552,8 +552,9 @@ const char* const kToolchainFault = "the toolchain files the preparation carries
 //      temporal AA reprojects with on 3.0.3): every platform's library is built again
 //   4: the recompiler keeps every jump table target when functions overlap a br (ACNHRecomp 8d0f374; the probable
 //      crash shooting a balloon at 60 FPS, ACNHRecomp #58): every platform's library is built again
-constexpr int kRevision = 4;
-static int first_good_revision(const std::string&) { return 4; }
+//   5: profile-guided O3 optimization of ACNH 3.0.3's hot game functions
+constexpr int kRevision = 5;
+static int first_good_revision(const std::string&) { return 5; }
 
 bool library_current(const std::string& out, const std::string& target, const std::string& build_id) {
     const Target* t = find_target(target);
@@ -671,9 +672,11 @@ int build(const Options& o, std::string& error) {
                                      "-I" + u8s(work / "runtime")};
     base.insert(base.end(), t->cflags.begin(), t->cflags.end());
     if (opt_flags(o.opt).empty()) return error = "no such optimisation level: " + o.opt, 1;
+    if (opt_flags(o.hot_opt).empty()) return error = "no such hot optimisation level: " + o.hot_opt, 1;
 
-    // With a hot list for this game (hot/<build id>.txt): its functions at o.opt, the rest at "fast", regrouped into
-    // files of each kind once for all targets (split()). Without one: the recompiler's files, all at o.opt.
+    // With a hot list for this game (hot/<build id>.txt): its functions at o.hot_opt and the rest at o.opt,
+    // regrouped into files of each kind once for all targets (split()). Without one: the recompiler's files, all at
+    // o.opt.
     HotSet hot;
     const std::string hot_id = o.split ? load_hot(o.build_id, hot) : "";
     struct Src {
@@ -691,7 +694,7 @@ int build(const Options& o, std::string& error) {
             if (int rc = split(gen, m, hot, hot_id, error)) return rc;
             for (const auto& e : fs::directory_iterator(gen / "split" / m, ec))
                 if (e.path().extension() == ".cpp")
-                    srcs.push_back({e.path(), m, u8s(e.path().filename()).rfind("hot_", 0) == 0 ? o.opt : "fast",
+                    srcs.push_back({e.path(), m, u8s(e.path().filename()).rfind("hot_", 0) == 0 ? o.hot_opt : o.opt,
                                     e.file_size(ec)});
             srcs.push_back({gen / m / "table.cpp", m, o.opt, fs::file_size(gen / m / "table.cpp", ec)});
         } else {
@@ -724,7 +727,8 @@ int build(const Options& o, std::string& error) {
 
     unsigned jobs = o.jobs ? o.jobs : default_jobs();
     log("compiling " + std::to_string(srcs.size()) + " files for " + t->name + " (" +
-        (hot_id.empty() ? o.opt : o.opt + " for the " + std::to_string(hot.size()) + " functions of " + hot_id + ", fast for the rest") +
+        (hot_id.empty() ? o.opt : o.hot_opt + " for the " + std::to_string(hot.size()) + " profiled functions of " +
+                                         hot_id + ", " + o.opt + " for the rest") +
         ", " + std::to_string(jobs) + " jobs)");
     std::atomic<size_t> next{0}, done{0};
     std::mutex mx;

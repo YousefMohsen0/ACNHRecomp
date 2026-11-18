@@ -61,7 +61,7 @@ link, Android's `DT_NEEDED` stubs (`libacnh.so`, `libc++_shared.so`, ...), `cpu_
 against this checkout's `runtime/include/nx/*.h` and `runtime/src/game_abi.cpp` (built in) with the top
 `CMakeLists.txt`'s `NX_GAME_ABI`, so a library and the player of the same checkout always agree; `abi.txt`,
 `build.txt` and `rev.txt` beside it say what it was built from, and one of another runtime is built again. Hot lists
-(`gamelib/hot/<build id>.txt`, none yet) build the functions the game spends its time in at -O2 and the rest faster.
+(`gamelib/hot/<build id>.txt`) build the profiled functions at -O3 while keeping the remaining functions at -O2.
 From the Importer's `src/gamelib/` (its runtime copies were identical to `runtime/`), without its package repair:
 `check_toolchain()` compares the zig folder with the `sizes.txt` `tools/fetch_zig.py` writes.
 
