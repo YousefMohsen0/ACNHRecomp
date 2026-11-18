@@ -200,9 +200,21 @@ void focus_hover(CPU& c, uint64_t f) {
     set_focus(c, mgr, entry, t);
 }
 
+// A list with a cursor on and items to pick is a menu: the touch gestures scroll it (runtime.h: ui_menu_seen).
+void note_menu(CPU& c) {
+    uint64_t mgr = c.x[0];
+    if (!mgr || (c.x[3] & 1) || ld<uint32_t>(mgr + 0x18) == 0) return;
+    uint64_t entry = ld<uint64_t>(ld<uint64_t>(mgr + 0x20));
+    if (entry && ld<uint64_t>(entry + 0x10) && has_enabled(mgr)) {
+        if (tracing() && !ui_menu_open()) log("acnh: a menu is up (manager %llx)", (unsigned long long)mgr);
+        ui_menu_seen();
+    }
+}
+
 // main+3c48c60 (x0 = the manager, w3 bit 0: input blocked), before it reads this frame's input.
 void focus_input(CPU& c) {
     uint64_t f = g_frame.load();
+    note_menu(c);
     if (!g_click.pending) focus_hover(c, f);
     if (!g_click.pending) {
         uint32_t x, y;

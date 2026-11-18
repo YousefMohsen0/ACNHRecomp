@@ -138,16 +138,20 @@ const TouchButton* acnh_buttons(float aspect) {
     static std::atomic<int> cur{-1};
     static std::mutex lock;
     static float made_aspect = 0, made_scale = 0;
-    static std::string made_layout;
-    static bool made_swap = false;
+    static std::string made_layout, made_phone;
+    static bool made_swap = false, made_minimal = false;
     if (!(aspect > 0.5f && aspect < 5.0f)) aspect = kAcnhAspect;
     const float s = touch_size_scale();
     const std::string layout = config_get("input.touch_layout", "");
     const bool swap = config_get("input.layout", "console") == "xbox";
+    // Settings > Controls > On-screen buttons = Minimal (the default with native touch): B, L, R and the d-pad are
+    // gestures (two fingers, flicks, the stick's run), and ZL when the phone icon's spot is set (input.touch_phone_rect).
+    const bool minimal = config_get_bool("input.touch_native", true) && config_get("input.touch_buttons", "minimal") != "full";
+    const std::string phone = config_get("input.touch_phone_rect", "");
     std::lock_guard lk(lock);
     int c = cur.load(std::memory_order_relaxed);
     if (c >= 0 && std::fabs(made_aspect - aspect) < 1e-3f && made_scale == s && made_layout == layout &&
-        made_swap == swap)
+        made_swap == swap && made_minimal == minimal && made_phone == phone)
         return buf[c];
     const int next = c == 0 ? 1 : 0;
     const std::vector<Offset> offsets = parse_layout(layout);
@@ -160,9 +164,13 @@ const TouchButton* acnh_buttons(float aspect) {
                 b.x += dx / aspect, b.y += dy;
             }
         if (swap && (b.button == kA || b.button == kB)) b.button = b.button == kA ? kB : kA;
+        const uint64_t was = kAcnh[k].button;  // before the Xbox swap: B's place is the one hidden (with the swap it is confirm)
+        if (minimal && ((was == kB && !swap) || was == kL || was == kR || was == kUp || was == kDown || was == kLeft ||
+                        was == kRight || (was == kZL && !phone.empty())))
+            b.r = 0;  // hidden: no hit, nothing drawn (platform_android_input.cpp)
         buf[next][k] = b;
     }
-    made_aspect = aspect, made_scale = s, made_layout = layout, made_swap = swap;
+    made_aspect = aspect, made_scale = s, made_layout = layout, made_swap = swap, made_minimal = minimal, made_phone = phone;
     g_face_swapped.store(swap, std::memory_order_relaxed);
     cur.store(next, std::memory_order_release);
     return buf[next];

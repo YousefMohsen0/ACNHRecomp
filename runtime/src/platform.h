@@ -168,6 +168,7 @@ struct OverlayShape {
 };
 size_t touch_overlay(OverlayShape* out, size_t max);
 void set_gamepad_connected(bool connected);  // Android: a controller connected hides the touch controls
+void touch_calibrate_phone();                // Android: the next tap on the game is the NookPhone icon's spot (input.touch_phone_rect)
 // Performance hints (perf_hint.cpp; Android ADPF, nothing elsewhere): the calling thread takes part in making frames;
 // a frame's work took `ns`.
 void perf_hint_thread();

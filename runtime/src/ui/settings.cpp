@@ -1309,6 +1309,14 @@ void page_controls() {
     row("controls.touch_size", nullptr, [&](float w) { slider("input.touch_size", 50, 150, 100, "%d%%", w); });
     row("controls.touch_run", "controls.touch_run.desc", [&](float w) { toggle("input.touch_run", true, w); });
     row("controls.phone_vibration", "controls.phone_vibration.desc", [&](float w) { toggle("input.phone_vibration", false, w); });
+    row("controls.touch_gestures", "controls.touch_gestures.desc", [&](float w) { toggle("input.touch_gestures", true, w); });
+    row("controls.touch_buttons", "controls.touch_buttons.desc", [&](float w) {
+        combo("input.touch_buttons", "minimal",
+              {{"minimal", tr("controls.touch_buttons.minimal")}, {"full", tr("controls.touch_buttons.full")}}, w);
+    });
+    row("controls.phone_spot", "controls.phone_spot.desc", [&](float w) {
+        if (button(tr("controls.phone_spot.set"), w)) plat::touch_calibrate_phone();
+    });
     if (plat::touch_group(0)) {
         row("controls.touch_layout", "controls.touch_layout.desc", [&](float w) {
             if (button(tr(g_touch_edit ? "controls.touch_layout.done" : "controls.touch_layout.edit"), w))

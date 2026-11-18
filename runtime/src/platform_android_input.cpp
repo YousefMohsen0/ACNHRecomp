@@ -72,10 +72,27 @@ struct Touch {
     uint64_t t0_ns = 0;   // when it went down
     float vx = 0, vy = 0; // camera: the swipe's smoothed speed (px/s), set by the moves, only read by read_pad
     uint64_t move_ns = 0; // when the last move came
+    int dir = 0;          // once it moved: 1 mostly vertical (the camera, a menu's scroll), 2 mostly horizontal (a flick)
+    float sy = 0;         // a menu's scroll: where the last step was taken
+    bool pair = false;    // one of two fingers that went down together: a two-finger tap (B), not a click
 };
 std::vector<Touch> g_touches;
-// A button a tap presses for a moment (the phone icon -> ZL), applied in read_pad.
-uint64_t g_press_button = 0, g_press_until_ns = 0;
+// Buttons the gestures press for a moment (a tap on the phone icon -> ZL, a flick -> d-pad, two fingers -> B, ...),
+// one after another, applied in read_pad. Held long enough for a frame at 15 fps to see, with a gap so that two in a
+// row are two presses.
+struct Pulse {
+    uint64_t button, from, until;
+};
+std::deque<Pulse> g_pulses;
+uint64_t g_pulse_end = 0;
+void pulse(uint64_t button) {
+    if (g_pulses.size() >= 6) return;
+    const uint64_t from = std::max(monotonic_ns(), g_pulse_end + 90'000'000);
+    g_pulses.push_back({button, from, from + 110'000'000});
+    g_pulse_end = from + 110'000'000;
+}
+std::atomic<bool> g_calibrate_phone{false};  // Settings > Controls > Set the phone icon: the next tap is its spot
+uint64_t g_last_pair_ns = 0;
 
 bool is_acnh() {
     static const bool acnh = std::strcmp(nx::game::kInfo.id, "acnh") == 0;
@@ -225,8 +242,14 @@ int32_t on_input(android_app*, AInputEvent* e) {
             const bool fr = !b && !left && native_touch();  // the free part of the screen: taps and the camera
             if (b || left || fr) {
                 g_touches.push_back({AMotionEvent_getPointerId(e, index), x, y, x, y, left, b});
-                g_touches.back().free = fr;
-                g_touches.back().t0_ns = monotonic_ns();
+                Touch& nt = g_touches.back();
+                nt.free = fr;
+                nt.t0_ns = monotonic_ns();
+                nt.sy = y;
+                // Two fingers down together on the free part of the screen: a two-finger tap is B (back, cancel).
+                if (fr)
+                    for (auto& o : g_touches)
+                        if (&o != &nt && o.free && !o.moved && nt.t0_ns - o.t0_ns < 250'000'000) o.pair = nt.pair = true;
             }
         } else {
             bool left = x < g_w * 0.5f;
@@ -240,14 +263,37 @@ int32_t on_input(android_app*, AInputEvent* e) {
         // other hosts (hle_hid.cpp: guiTouchManager, the focus managers and the message window take it from there).
         if (kind != AMOTION_EVENT_ACTION_CANCEL && native_touch() && g_w > 1 && g_h > 1)
             for (const auto& t : g_touches) {
-                if (t.id != id || t.moved || (!t.free && !t.left) || monotonic_ns() - t.t0_ns > 350'000'000) continue;
+                if (t.id != id) continue;
+                const uint64_t tn = monotonic_ns();
+                const float dx = t.x - t.x0, dy = t.y - t.y0;
+                if (t.free && t.pair && !t.moved && tn - t.t0_ns < 400'000'000) {  // two fingers tapped: B
+                    if (tn - g_last_pair_ns > 400'000'000) pulse(kB), g_last_pair_ns = tn;
+                    continue;
+                }
+                if (t.free && t.moved && !t.pair && config_get_bool("input.touch_gestures", true)) {
+                    const bool menu = nx::ui_menu_open();
+                    if (t.dir == 2 && std::fabs(dx) > g_h * 0.10f && tn - t.t0_ns < 700'000'000) {
+                        // A flick sideways: in a menu the tabs (L, R), outside it the tools (d-pad left, right).
+                        pulse(menu ? (dx > 0 ? kL : kR) : (dx > 0 ? kLeft : kRight));
+                    } else if (t.dir == 1 && !menu && t.y0 > g_h * 0.88f && dy < -g_h * 0.12f) {
+                        pulse(kX);  // up from the bottom edge: the pockets
+                    }
+                }
+                if (t.id != id || t.moved || (!t.free && !t.left) || tn - t.t0_ns > 350'000'000) continue;
                 bool stick_in_use = false;
                 for (const auto& o : g_touches) stick_in_use |= o.left && o.id != id && o.moved;
                 float u = t.x / g_w, v = t.y / g_h, x0, y0, x1, y1;
                 if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: tap at %.3f, %.3f of the screen", u, v);
-                if (!stick_in_use && phone_rect(x0, y0, x1, y1) && u >= x0 && u <= x1 && v >= y0 && v <= y1) {
-                    g_press_button = kZL;
-                    g_press_until_ns = monotonic_ns() + 90'000'000;
+                if (g_calibrate_phone.load() && !nx::ui::ui_visible()) {  // Settings > Set the phone icon: this tap
+                    g_calibrate_phone = false;
+                    const float hw = 0.07f * g_h / g_w;
+                    char rect[96];
+                    std::snprintf(rect, sizeof rect, "%.4f,%.4f,%.4f,%.4f", std::max(0.f, u - hw), std::max(0.f, v - 0.07f),
+                                  std::min(1.f, u + hw), std::min(1.f, v + 0.07f));
+                    config_set("input.touch_phone_rect", rect);
+                    nx::log("touch: the phone icon is at %s", rect);
+                } else if (!stick_in_use && phone_rect(x0, y0, x1, y1) && u >= x0 && u <= x1 && v >= y0 && v <= y1) {
+                    pulse(kZL);
                 } else {
                     set_mouse_touch(true, u, v);  // down and up before the next frame: still one touch (g_mouse_tap)
                     set_mouse_touch(false, u, v);
@@ -271,7 +317,21 @@ int32_t on_input(android_app*, AInputEvent* e) {
                     }
                     t.x = nx_;
                     t.y = ny;
-                    if (std::hypot(t.x - t.x0, t.y - t.y0) > g_h * 0.03f) t.moved = true;  // past a tap's slop
+                    if (!t.moved && std::hypot(t.x - t.x0, t.y - t.y0) > g_h * 0.03f) {  // past a tap's slop
+                        t.moved = true;
+                        t.dir = std::fabs(t.x - t.x0) > std::fabs(t.y - t.y0) ? 2 : 1;
+                        t.sy = t.y0;
+                    }
+                    // In a menu a vertical drag scrolls it: a step of the d-pad every 6% of the screen's height, the
+                    // list following the finger (dragging up shows what is below).
+                    if (t.free && t.moved && t.dir == 1 && !t.pair && nx::ui_menu_open() &&
+                        config_get_bool("input.touch_gestures", true)) {
+                        const float step = g_h * 0.06f;
+                        while (std::fabs(t.y - t.sy) > step) {
+                            pulse(t.y < t.sy ? kDown : kUp);
+                            t.sy += t.y < t.sy ? -step : step;
+                        }
+                    }
                 }
         }
     }
@@ -336,7 +396,8 @@ void read_pad(PadState& p) {
     // push: its speed (smoothed over the moves, so it does not depend on the frame rate). Full push at a swipe of 1.5 screen heights a second (input.camera_sens, percent, scales that).
     float cam_x = 0, cam_y = 0;
     for (const auto& t : g_touches)
-        if (t.free && t.moved && now - t.move_ns < 90'000'000) cam_x += t.vx, cam_y += t.vy;  // still: no push
+        if (t.free && t.moved && t.dir == 1 && !t.pair && now - t.move_ns < 90'000'000) cam_x += t.vx, cam_y += t.vy;
+    if (nx::ui_menu_open()) cam_x = cam_y = 0;  // in a menu the same drag scrolls it (on_input)
     if ((cam_x != 0 || cam_y != 0) && native_touch() && config_get_bool("input.touch_camera", true)) {
         const float full = g_h * 1.5f / (float(std::clamp(config_get_int("input.camera_sens", 100), 20, 400)) / 100.0f);
         const float inv = config_get_bool("input.camera_invert", false) ? -1.f : 1.f;
@@ -344,7 +405,9 @@ void read_pad(PadState& p) {
         p.ry = int32_t(std::clamp(-cam_y * inv / full, -1.f, 1.f) * kStickMax);
         if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: camera %d, %d", p.rx, p.ry);
     }
-    if (now < g_press_until_ns) p.buttons |= g_press_button;  // a tap on the phone icon
+    while (!g_pulses.empty() && now >= g_pulses.front().until) g_pulses.pop_front();
+    for (const auto& pl : g_pulses)
+        if (now >= pl.from) p.buttons |= pl.button;  // a gesture's button press (pulse)
     input_script(p);  // NX_INPUT_SCRIPT (config.txt): scripted runs on the phone, as on the Mac
     // The gear opens and closes the settings screen; it is not a pad button.
     static bool gear_held = false;
@@ -357,6 +420,8 @@ void read_pad(PadState& p) {
     p.buttons = nx::ui::ui_filter_game_buttons(p.buttons, ui);
     if (ui) p = PadState{};
 }
+
+void touch_calibrate_phone() { g_calibrate_phone = true; }
 
 bool gamepad_connected() {
     std::lock_guard lk(g_in);
@@ -404,7 +469,8 @@ size_t touch_overlay(OverlayShape* out, size_t max) {
         return code;
     };
     for (size_t i = 0; i < n && k < max; i++)
-        out[k++] = {b[i].x, b[i].y, b[i].r, std::min(1.0f, (held & b[i].button ? 0.5f : 0.2f) * shade), label_code(touch_label(i))};
+        if (b[i].r > 0)  // a hidden button (touch_layout.cpp: minimal buttons) has no radius
+            out[k++] = {b[i].x, b[i].y, b[i].r, std::min(1.0f, (held & b[i].button ? 0.5f : 0.2f) * shade), label_code(touch_label(i))};
     if (stick && k + 2 <= max) {
         float r = 0.12f, dx = (stick->x - stick->x0) / g_h, dy = (stick->y - stick->y0) / g_h;
         float len = std::hypot(dx, dy), s = len > r ? r / len : 1.f;
