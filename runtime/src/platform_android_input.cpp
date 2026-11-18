@@ -70,7 +70,8 @@ struct Touch {
     bool free = false;    // not on a button and not the stick: the camera / taps
     bool moved = false;   // went past the tap slop: no longer a tap
     uint64_t t0_ns = 0;   // when it went down
-    float ax = 0, ay = 0; // camera: movement since read_pad last took it (px)
+    float vx = 0, vy = 0; // camera: the swipe's smoothed speed (px/s), set by the moves, only read by read_pad
+    uint64_t move_ns = 0; // when the last move came
 };
 std::vector<Touch> g_touches;
 // A button a tap presses for a moment (the phone icon -> ZL), applied in read_pad.
@@ -261,7 +262,13 @@ int32_t on_input(android_app*, AInputEvent* e) {
             for (auto& t : g_touches)
                 if (t.id == id) {
                     float nx_ = AMotionEvent_getX(e, k), ny = AMotionEvent_getY(e, k);
-                    if (t.free) t.ax += nx_ - t.x, t.ay += ny - t.y;
+                    if (t.free) {  // the speed is kept here, not taken by read_pad: the game reads the pad more than once a frame
+                        const uint64_t tn = monotonic_ns();
+                        const float dts = std::max(0.004f, float(tn - (t.move_ns ? t.move_ns : t.t0_ns)) * 1e-9f);
+                        t.vx = t.vx * 0.5f + (nx_ - t.x) / dts * 0.5f;
+                        t.vy = t.vy * 0.5f + (ny - t.y) / dts * 0.5f;
+                        t.move_ns = tn;
+                    }
                     t.x = nx_;
                     t.y = ny;
                     if (std::hypot(t.x - t.x0, t.y - t.y0) > g_h * 0.03f) t.moved = true;  // past a tap's slop
@@ -326,21 +333,17 @@ void read_pad(PadState& p) {
         }
     }
     // Native touch: a finger dragged over the free part of the screen is the right stick (the camera), its speed the
-    // push: the movement since the last read over the time between the reads, so the camera turns the same at 15 fps
-    // and at 60. Full push at a swipe of 1.5 screen heights a second (input.camera_sens, percent, scales that).
-    static uint64_t cam_ns = 0;
+    // push: its speed (smoothed over the moves, so it does not depend on the frame rate). Full push at a swipe of 1.5 screen heights a second (input.camera_sens, percent, scales that).
     float cam_x = 0, cam_y = 0;
-    bool cam = false;
-    for (auto& t : g_touches)
-        if (t.free && t.moved) cam = true, cam_x += t.ax, cam_y += t.ay, t.ax = t.ay = 0;
-    if (cam && cam_ns && now > cam_ns && native_touch() && config_get_bool("input.touch_camera", true)) {
-        const float dt = std::max(0.005f, float(now - cam_ns) * 1e-9f);
+    for (const auto& t : g_touches)
+        if (t.free && t.moved && now - t.move_ns < 90'000'000) cam_x += t.vx, cam_y += t.vy;  // still: no push
+    if ((cam_x != 0 || cam_y != 0) && native_touch() && config_get_bool("input.touch_camera", true)) {
         const float full = g_h * 1.5f / (float(std::clamp(config_get_int("input.camera_sens", 100), 20, 400)) / 100.0f);
         const float inv = config_get_bool("input.camera_invert", false) ? -1.f : 1.f;
-        p.rx = int32_t(std::clamp(cam_x / dt / full, -1.f, 1.f) * kStickMax);
-        p.ry = int32_t(std::clamp(-cam_y * inv / dt / full, -1.f, 1.f) * kStickMax);
+        p.rx = int32_t(std::clamp(cam_x / full, -1.f, 1.f) * kStickMax);
+        p.ry = int32_t(std::clamp(-cam_y * inv / full, -1.f, 1.f) * kStickMax);
+        if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: camera %d, %d", p.rx, p.ry);
     }
-    cam_ns = now;
     if (now < g_press_until_ns) p.buttons |= g_press_button;  // a tap on the phone icon
     input_script(p);  // NX_INPUT_SCRIPT (config.txt): scripted runs on the phone, as on the Mac
     // The gear opens and closes the settings screen; it is not a pad button.
