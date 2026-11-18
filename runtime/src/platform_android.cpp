@@ -969,7 +969,44 @@ void show_fatal(const char*) {}  // the app's own screens explain (Home.java rea
 void set_master_volume(float) {}
 std::string controller_name() { return ""; }
 std::string controller_kind() { return ""; }
-void rumble(float, float, uint32_t) {}
+// The game's vibration on the phone itself, opt in (input.phone_vibration, Settings > Controls) and only while no
+// controller is connected (a controller's motors are not driven on Android yet). The game sends a value every few
+// frames with a short duration: one VibrationEffect per send, at the stronger of its two motors' amplitude, at most
+// every 40 ms; zero cancels. Vibrator via Context.getSystemService("vibrator"), VibrationEffect.createOneShot (API 26+;
+// minSdk is 29). The calling thread is attached to Java for good, so a local frame keeps the JNI refs from piling up.
+void rumble(float low, float high, uint32_t duration_ms) {
+    if (!g_app || !config_get_bool("input.phone_vibration", false) || gamepad_connected()) return;
+    static uint64_t last_ns = 0;
+    static float last_amp = -1;
+    const float amp = std::clamp(std::max(low, high), 0.0f, 1.0f);
+    const bool stop = amp < 0.01f || duration_ms == 0;
+    const uint64_t now = monotonic_ns();
+    if (stop ? last_amp <= 0 : (now - last_ns < 40'000'000 && std::fabs(amp - last_amp) < 0.15f)) return;
+    last_ns = now;
+    last_amp = stop ? 0 : amp;
+    JNIEnv* env = nullptr;
+    if (g_app->activity->vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) return;
+    env->PushLocalFrame(16);
+    jobject act = g_app->activity->clazz;
+    jclass actc = env->GetObjectClass(act);
+    jobject vib = env->CallObjectMethod(act, env->GetMethodID(actc, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;"),
+                                        env->NewStringUTF("vibrator"));
+    if (!env->ExceptionCheck() && vib) {
+        jclass vc = env->GetObjectClass(vib);
+        if (stop) {
+            env->CallVoidMethod(vib, env->GetMethodID(vc, "cancel", "()V"));
+        } else {
+            jclass ec = env->FindClass("android/os/VibrationEffect");
+            jobject effect = env->CallStaticObjectMethod(
+                ec, env->GetStaticMethodID(ec, "createOneShot", "(JI)Landroid/os/VibrationEffect;"),
+                jlong(std::clamp<uint32_t>(duration_ms, 20, 400)), jint(std::clamp(int(amp * 255.0f), 1, 255)));
+            if (!env->ExceptionCheck() && effect)
+                env->CallVoidMethod(vib, env->GetMethodID(vc, "vibrate", "(Landroid/os/VibrationEffect;)V"), effect);
+        }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->PopLocalFrame(nullptr);
+}
 // The folder picker and "open folder" (the settings screen's Saves page) are android/java Picker: NativeActivity gets
 // no activity results, so the picked path comes back through a file in the app's own folder.
 namespace {

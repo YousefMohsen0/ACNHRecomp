@@ -355,6 +355,11 @@ void read_pad(PadState& p) {
     if (ui) p = PadState{};
 }
 
+bool gamepad_connected() {
+    std::lock_guard lk(g_in);
+    return g_pad_connected;
+}
+
 // A controller connected: the touch controls hide at once (as on its first input); disconnected: they come back.
 void set_gamepad_connected(bool connected) {
     std::lock_guard lk(g_in);

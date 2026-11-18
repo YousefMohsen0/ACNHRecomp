@@ -397,6 +397,7 @@ void toggle(const std::string& key, bool fallback, float width = 0) {
         if (key == "input.rumble" && !was_on && on) {
             plat::rumble(0.45f, 0.70f, 180);
         }
+        if (key == "input.phone_vibration" && !was_on && on) plat::rumble(0.60f, 0.60f, 180);  // a test pulse
     }
 }
 
@@ -1307,6 +1308,7 @@ void page_controls() {
     row("controls.touch_opacity", nullptr, [&](float w) { slider("input.touch_opacity", 10, 100, 60, "%d%%", w); });
     row("controls.touch_size", nullptr, [&](float w) { slider("input.touch_size", 50, 150, 100, "%d%%", w); });
     row("controls.touch_run", "controls.touch_run.desc", [&](float w) { toggle("input.touch_run", true, w); });
+    row("controls.phone_vibration", "controls.phone_vibration.desc", [&](float w) { toggle("input.phone_vibration", false, w); });
     if (plat::touch_group(0)) {
         row("controls.touch_layout", "controls.touch_layout.desc", [&](float w) {
             if (button(tr(g_touch_edit ? "controls.touch_layout.done" : "controls.touch_layout.edit"), w))

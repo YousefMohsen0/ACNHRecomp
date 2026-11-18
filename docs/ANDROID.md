@@ -131,6 +131,8 @@ Open **ACNH Recomp** on the phone. The first start takes a minute or two: shader
   `input.camera_sens=100` (percent), `input.camera_invert=1`, and `input.touch_phone_rect=x0,y0,x1,y1` (0..1 across
   the screen): a tap there, with the stick not in use, presses ZL (the NookPhone). Set `NX_TRACE_TOUCH=1` to log where
   each tap landed, to find the phone icon's rectangle.
+- **Vibrate the phone (test)**: Settings > Controls > Vibrate the phone (`input.phone_vibration=1`, off by default). The game's
+  vibration plays on the phone itself, only while no controller is connected. Needs the Vibration switch above on too.
 - **A controller** (Bluetooth or USB) hides the touch controls by itself while it is connected. The settings can
   also hide them for good. *Confirm / cancel buttons* (Settings > Controls) puts the game's A on its bottom button
   (Xbox layout), and on the touch controls too.

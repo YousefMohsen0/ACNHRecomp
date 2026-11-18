@@ -12,5 +12,6 @@ int32_t on_input(android_app*, AInputEvent* e);    // platform_android_input.cpp
 // platform_android_input.cpp: the touches the settings screen took that ended, counted; whether one is on it now.
 uint64_t ui_taps();
 bool ui_finger_down();
+bool gamepad_connected();  // platform_android_input.cpp: a controller is connected (the phone's own vibration is for when none is)
 
 }  // namespace nx::plat

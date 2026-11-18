@@ -391,6 +391,8 @@ const Entry kEn[] = {
     {"controls.touch.desc", "Buttons and stick drawn over the game. They hide by themselves while a controller is used."},
     {"controls.touch_opacity", "On-screen controls opacity"},
     {"controls.touch_size", "On-screen controls size"},
+    {"controls.phone_vibration", "Vibrate the phone"},
+    {"controls.phone_vibration.desc", "The game's vibration on the phone itself, when no controller is connected. Off by default."},
     {"controls.touch_run", "Run with the stick"},
     {"controls.touch_run.desc", "Sliding the on-screen stick past its ring for a moment also holds B, so you run (the ring lights up). Turn it off to run with B only: B is also Cancel in menus."},
     {"controls.keyboard", "Keyboard"},
