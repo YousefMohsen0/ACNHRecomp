@@ -2,7 +2,7 @@ name: Experimental Android APK
 
 on:
   push:
-    branches: [phone-mali-framegen]
+    branches: [phone-mali-framegen, touch-controls]
   workflow_dispatch:
 
 permissions:
