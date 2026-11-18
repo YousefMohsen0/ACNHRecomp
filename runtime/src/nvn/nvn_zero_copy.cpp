@@ -38,7 +38,19 @@ bool wanted() {
 #if defined(__ANDROID__)
     static const bool on = [] {
         const char* e = std::getenv("NX_ZERO_COPY");
-        return !(e && e[0] == '0');
+        if (e) return e[0] != '0';  // An explicit config.txt value always wins.
+
+        // Mali advertises dma-buf export, but its driver cannot map the exported pool FD back into the process.
+        // Trying each pool still allocates a Vulkan buffer, exports an FD, then tears it all down; the Android log
+        // reported "mmap of the dma-buf (9)" for every eligible pool. Keep the faster path available as an explicit
+        // NX_ZERO_COPY=1 experiment, but avoid that failed work by default on Mali.
+        VkPhysicalDeviceProperties props{};
+        p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
+        if (props.vendorID == 0x13B5) {
+            log("zero copy: disabled by default on Mali (dma-buf mmap unsupported; NX_ZERO_COPY=1 overrides)");
+            return false;
+        }
+        return true;
     }();
     return on;
 #else
