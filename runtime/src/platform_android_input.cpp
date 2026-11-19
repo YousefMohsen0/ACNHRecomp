@@ -49,6 +49,10 @@
 #include "ui/ui.h"
 
 // Android input: game controllers and touch (split from platform_android.cpp).
+namespace nx {
+bool ui_menu_open();  // hle_hid.cpp (a menu is up; not in nx/runtime.h, whose text is the ABI hash)
+}
+
 namespace nx::plat {
 
 // ---- input: game controllers + touch --------------------------------------------------------------------------

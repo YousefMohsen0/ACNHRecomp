@@ -139,10 +139,6 @@ bool mouse_take_hover(uint32_t& x, uint32_t& y);
 // Holds these npad buttons (nn::hid::NpadButton bits: A = 1) down for `frames` frames from the next one (after the
 // one before it, if that is still held, and two frames up).
 void hid_hold_buttons(uint64_t buttons, uint32_t frames);
-// A game's menu is up: the game side calls ui_menu_seen() each frame a list with a cursor is active (acnh pointer.cpp);
-// ui_menu_open() is true for a few frames after. The touch gestures read it: a swipe scrolls a menu, it moves the camera outside.
-void ui_menu_seen();
-bool ui_menu_open();
 
 void kernel_init();
 uint32_t create_main_thread(uint64_t stack_size);  // the calling host thread becomes it

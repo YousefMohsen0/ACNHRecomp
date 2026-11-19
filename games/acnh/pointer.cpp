@@ -16,6 +16,11 @@
 
 namespace nx {
 
+// hle_hid.cpp: a menu is up (a list with a cursor is active); declared here, not in nx/runtime.h, whose text is the
+// game libraries' ABI hash (CMakeLists.txt NX_GAME_ABI): a change there makes every prepared game folder be prepared again.
+void ui_menu_seen();
+bool ui_menu_open();
+
 namespace {
 
 // ---- guiTouchManager ------------------------------------------------------------------------------------------
