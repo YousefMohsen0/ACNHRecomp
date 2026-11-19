@@ -541,12 +541,20 @@ bool mouse_take_hover(uint32_t& x, uint32_t& y) {
 
 namespace {
 std::atomic<uint64_t> g_menu_frame{0};
+std::atomic<bool> g_menu_touched{false};  // a click was taken by an item of this menu: it answers touch
 }
-void ui_menu_seen() { g_menu_frame.store(g_frame.load(), std::memory_order_relaxed); }
 bool ui_menu_open() {
     const uint64_t seen = g_menu_frame.load(std::memory_order_relaxed);
     return seen && g_frame.load() <= seen + 6;
 }
+void ui_menu_seen() {
+    if (!ui_menu_open()) g_menu_touched.store(false, std::memory_order_relaxed);  // a new menu
+    g_menu_frame.store(g_frame.load(), std::memory_order_relaxed);
+}
+void ui_menu_touched() { g_menu_touched.store(true, std::memory_order_relaxed); }
+// A menu that has answered a tap: only then the drawn controls give way to touch (a screen of prompts, like the
+// title's "Press A", never takes a click and keeps them).
+bool ui_menu_touchable() { return ui_menu_open() && g_menu_touched.load(std::memory_order_relaxed); }
 
 bool touch_take_tap(uint32_t& x, uint32_t& y, uint64_t& frame) {
     std::lock_guard lk(g_tap_lock);

@@ -50,6 +50,7 @@
 
 // Android input: game controllers and touch (split from platform_android.cpp).
 namespace nx {
+bool ui_menu_touchable();  // hle_hid.cpp: a menu that has answered a tap
 bool ui_menu_open();  // hle_hid.cpp (a menu is up; not in nx/runtime.h, whose text is the ABI hash)
 }
 
@@ -97,6 +98,7 @@ void pulse(uint64_t button) {
 }
 std::atomic<bool> g_calibrate_phone{false};  // Settings > Controls > Set the phone icon: the next tap is its spot
 uint64_t g_last_pair_ns = 0;
+bool g_pressed_once = false;  // a button has been pressed in this run: the title screen is behind us
 
 bool is_acnh() {
     static const bool acnh = std::strcmp(nx::game::kInfo.id, "acnh") == 0;
@@ -242,7 +244,7 @@ int32_t on_input(android_app*, AInputEvent* e) {
         touch_buttons(drawn, g_w / g_h);
         if (drawn) {  // a drawn layout (touch_layout.cpp): its buttons first, the rest of the left half is the stick
             // While a menu is up there is no layout: nothing is drawn, the whole screen is touch (taps click, drags scroll).
-            const bool in_menu = native_touch() && nx::ui_menu_open();
+            const bool in_menu = native_touch() && nx::ui_menu_touchable();
             uint64_t b = in_menu ? 0 : touch_hit(x / g_w, y / g_h, g_w / g_h);
             bool left = !in_menu && !b && (touch_mirrored() ? x > g_w * 0.5f : x < g_w * 0.5f);
             const bool fr = !b && !left && native_touch();  // the free part of the screen: taps and the camera
@@ -300,6 +302,10 @@ int32_t on_input(android_app*, AInputEvent* e) {
                                   std::min(1.f, u + hw), std::min(1.f, v + 0.07f));
                     config_set("input.touch_phone_rect", rect);
                     nx::log("touch: the phone icon is at %s", rect);
+                } else if (!g_pressed_once && config_get_bool("input.touch_title", true)) {
+                    // The title screen's prompts are not buttons ("Press A", "- Settings"): before the first button press
+                    // of the run a tap at the bottom left is Minus (Settings), any other tap is A.
+                    pulse(u < 0.32f && v > 0.84f ? kMinus : kA);
                 } else if (!stick_in_use && phone_rect(x0, y0, x1, y1) && u >= x0 && u <= x1 && v >= y0 && v <= y1) {
                     pulse(kZL);
                 } else {
@@ -427,6 +433,7 @@ void read_pad(PadState& p) {
     if (gear && !gear_held) nx::ui::ui_toggle();
     gear_held = gear;
     p.buttons &= ~kSettingsButton;
+    if (p.buttons) g_pressed_once = true;
     // The settings screen takes the controller while it is open (and watches for its Minus + Plus combo).
     bool ui = nx::ui::ui_pad(p.buttons, p.lx, p.ly);
     p.buttons = nx::ui::ui_filter_game_buttons(p.buttons, ui);
@@ -462,7 +469,7 @@ size_t touch_overlay(OverlayShape* out, size_t max) {
     const TouchButton* b = touch_buttons(n, g_w / g_h);
     if (!n) return 0;
     if (g_gamepad || !touch_enabled()) return 0;
-    if (native_touch() && nx::ui_menu_open()) return 0;  // a menu: touch only, no buttons, no stick
+    if (native_touch() && nx::ui_menu_touchable()) return 0;  // a menu that answers taps: touch only, no buttons, no stick
     const float shade = touch_opacity_scale();
     const Touch* stick = nullptr;
     uint64_t held = 0;

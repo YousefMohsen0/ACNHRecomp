@@ -19,7 +19,9 @@ namespace nx {
 // hle_hid.cpp: a menu is up (a list with a cursor is active); declared here, not in nx/runtime.h, whose text is the
 // game libraries' ABI hash (CMakeLists.txt NX_GAME_ABI): a change there makes every prepared game folder be prepared again.
 void ui_menu_seen();
+void ui_menu_touched();
 bool ui_menu_open();
+bool ui_menu_touchable();
 
 namespace {
 
@@ -235,7 +237,7 @@ void focus_input(CPU& c) {
     }
     if (f > g_click.until) {
         // Nothing took the click and a menu is up: a tap outside it goes back, as a tap outside a window closes it (B).
-        if (g_click.until && !g_click.woke && ui_menu_open()) {
+        if (g_click.until && !g_click.woke && ui_menu_touchable()) {
             if (tracing()) log("acnh: click at %u x %u on no item of the menu: B", g_click.x, g_click.y);
             hid_hold_buttons(2 /* B */, 3);
         }
@@ -267,6 +269,7 @@ void focus_input(CPU& c) {
             (unsigned long long)ld<uint64_t>(t + 0x28), (unsigned long long)t, (unsigned long long)mgr);
     set_focus(c, mgr, entry, t);
     hid_hold_buttons(1 /* A */, 3);
+    ui_menu_touched();  // this menu answers touch
 }
 
 // ---- messages ---------------------------------------------------------------------------------------------------
@@ -291,7 +294,7 @@ void button_input(CPU& c) {
             if (v == vt) { known = true; break; }
             if (!v && s.compare_exchange_strong(v, vt)) break;
         }
-        if (!known) log("acnh: a button handler is on, owner class %s", describe(vt).c_str());
+        if (!known) log("acnh: a button handler is on, owner class %s, button %u", describe(vt).c_str(), ld<uint32_t>(h + 0x14));
     }
     if (!owner || ld<uint64_t>(owner) != kModuleBase + g_page_turner) return;
     uint64_t f = g_frame.load();
