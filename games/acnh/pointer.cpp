@@ -229,7 +229,16 @@ void focus_input(CPU& c) {
     }
     // A frame later, once guiTouchManager has had its turn with the same click; a few frames to find a taker.
     if (f <= g_click.frame) return;
-    if (f > g_click.until || g_gui_click_frame >= g_click.frame) {
+    if (g_gui_click_frame >= g_click.frame) {  // a button of the touch tree took it
+        g_click.pending = false;
+        return;
+    }
+    if (f > g_click.until) {
+        // Nothing took the click and a menu is up: a tap outside it goes back, as a tap outside a window closes it (B).
+        if (g_click.until && !g_click.woke && ui_menu_open()) {
+            if (tracing()) log("acnh: click at %u x %u on no item of the menu: B", g_click.x, g_click.y);
+            hid_hold_buttons(2 /* B */, 3);
+        }
         g_click.pending = false;
         return;
     }

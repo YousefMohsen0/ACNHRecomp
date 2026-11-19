@@ -241,8 +241,10 @@ int32_t on_input(android_app*, AInputEvent* e) {
         size_t drawn = 0;
         touch_buttons(drawn, g_w / g_h);
         if (drawn) {  // a drawn layout (touch_layout.cpp): its buttons first, the rest of the left half is the stick
-            uint64_t b = touch_hit(x / g_w, y / g_h, g_w / g_h);
-            bool left = !b && (touch_mirrored() ? x > g_w * 0.5f : x < g_w * 0.5f);
+            // While a menu is up there is no layout: nothing is drawn, the whole screen is touch (taps click, drags scroll).
+            const bool in_menu = native_touch() && nx::ui_menu_open();
+            uint64_t b = in_menu ? 0 : touch_hit(x / g_w, y / g_h, g_w / g_h);
+            bool left = !in_menu && !b && (touch_mirrored() ? x > g_w * 0.5f : x < g_w * 0.5f);
             const bool fr = !b && !left && native_touch();  // the free part of the screen: taps and the camera
             if (b || left || fr) {
                 g_touches.push_back({AMotionEvent_getPointerId(e, index), x, y, x, y, left, b});
@@ -460,6 +462,7 @@ size_t touch_overlay(OverlayShape* out, size_t max) {
     const TouchButton* b = touch_buttons(n, g_w / g_h);
     if (!n) return 0;
     if (g_gamepad || !touch_enabled()) return 0;
+    if (native_touch() && nx::ui_menu_open()) return 0;  // a menu: touch only, no buttons, no stick
     const float shade = touch_opacity_scale();
     const Touch* stick = nullptr;
     uint64_t held = 0;
