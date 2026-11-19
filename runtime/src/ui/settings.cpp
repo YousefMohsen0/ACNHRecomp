@@ -1311,7 +1311,7 @@ void page_controls() {
     row("controls.phone_vibration", "controls.phone_vibration.desc", [&](float w) { toggle("input.phone_vibration", false, w); });
     row("controls.touch_gestures", "controls.touch_gestures.desc", [&](float w) { toggle("input.touch_gestures", true, w); });
     row("controls.touch_buttons", "controls.touch_buttons.desc", [&](float w) {
-        combo("input.touch_buttons", "minimal",
+        combo("input.touch_buttons", "full",
               {{"minimal", tr("controls.touch_buttons.minimal")}, {"full", tr("controls.touch_buttons.full")}}, w);
     });
     row("controls.phone_spot", "controls.phone_spot.desc", [&](float w) {

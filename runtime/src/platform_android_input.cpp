@@ -270,6 +270,8 @@ int32_t on_input(android_app*, AInputEvent* e) {
                 if (t.id != id) continue;
                 const uint64_t tn = monotonic_ns();
                 const float dx = t.x - t.x0, dy = t.y - t.y0;
+                if (t.free && t.dir == 1)  // a menu's scroll stops with the finger, not some steps after it
+                    std::erase_if(g_pulses, [&](const Pulse& q) { return (q.button == kUp || q.button == kDown) && q.from > tn; });
                 if (t.free && t.pair && !t.moved && tn - t.t0_ns < 400'000'000) {  // two fingers tapped: B
                     if (tn - g_last_pair_ns > 400'000'000) pulse(kB), g_last_pair_ns = tn;
                     continue;
@@ -331,8 +333,12 @@ int32_t on_input(android_app*, AInputEvent* e) {
                     if (t.free && t.moved && t.dir == 1 && !t.pair && nx::ui_menu_open() &&
                         config_get_bool("input.touch_gestures", true)) {
                         const float step = g_h * 0.06f;
+                        // The list moves a step at a time (a game frame has to see each press): when the finger is
+                        // ahead of it the steps it cannot show are dropped, so it never runs on after the finger.
+                        long queued = std::count_if(g_pulses.begin(), g_pulses.end(),
+                                                    [](const Pulse& q) { return q.button == kUp || q.button == kDown; });
                         while (std::fabs(t.y - t.sy) > step) {
-                            pulse(t.y < t.sy ? kDown : kUp);
+                            if (queued < 2) pulse(t.y < t.sy ? kDown : kUp), queued++;
                             t.sy += t.y < t.sy ? -step : step;
                         }
                     }

@@ -394,7 +394,7 @@ const Entry kEn[] = {
     {"controls.touch_gestures", "Touch gestures"},
     {"controls.touch_gestures.desc", "Swipe up/down to move the camera (or scroll a menu), flick sideways to change tools (or menu tabs), two fingers to go back (B), swipe up from the bottom edge for the pockets (X)."},
     {"controls.touch_buttons", "On-screen buttons"},
-    {"controls.touch_buttons.desc", "Minimal hides B, L, R and the d-pad, which the gestures replace. Full shows them all."},
+    {"controls.touch_buttons.desc", "Full shows every button. Minimal hides B (it comes back whenever a menu is up), L, R and the d-pad, which the gestures replace."},
     {"controls.touch_buttons.minimal", "Minimal"},
     {"controls.touch_buttons.full", "Full"},
     {"controls.phone_spot", "NookPhone icon"},

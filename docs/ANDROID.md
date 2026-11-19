@@ -134,8 +134,8 @@ Open **ACNH Recomp** on the phone. The first start takes a minute or two: shader
 - **Touch gestures (ACNH, test; Settings > Controls > Touch gestures)**: outside menus a vertical drag on the free part of
   the screen is the camera and a sideways flick changes tools (d-pad left/right); in a menu a vertical drag scrolls it (d-pad
   up/down, a step every 6% of the screen's height) and a sideways flick changes tabs (L/R); two fingers tapped together are
-  B (back); a swipe up from the bottom edge is X (pockets). "On-screen buttons: Minimal" (the default) hides B, L, R and the
-  d-pad, which these replace; Full shows them all (island editing, photo mode and item dragging still want them).
+  B (back); a swipe up from the bottom edge is X (pockets). "On-screen buttons: Full" (the default) shows every button; Minimal hides L, R, the d-pad and B (B comes back
+  while a menu is up), which these replace (island editing, photo mode and item dragging still want them).
   "NookPhone icon > Set": press it, close the settings, tap the phone icon once: a tap there (stick not moving) presses ZL
   and the drawn ZL hides. A menu is "a list with a cursor is up" (games/acnh/pointer.cpp, `NX_TRACE_TOUCH=1` logs it): if
   the camera does not move in the world, or a menu does not scroll, send that log.
