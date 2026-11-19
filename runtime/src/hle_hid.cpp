@@ -552,6 +552,19 @@ void ui_menu_seen() {
     g_menu_frame.store(g_frame.load(), std::memory_order_relaxed);
 }
 void ui_menu_touched() { g_menu_touched.store(true, std::memory_order_relaxed); }
+// The distance between the focused item and its nearest neighbour below/above (y) and beside it (x), in screen heights
+// (0: none): a drag scrolls a step per such distance, so the list follows the finger (platform_android_input.cpp).
+namespace {
+std::atomic<float> g_pitch_y{0}, g_pitch_x{0};
+}
+void ui_menu_pitch_set(float y, float x) {
+    g_pitch_y.store(y, std::memory_order_relaxed);
+    g_pitch_x.store(x, std::memory_order_relaxed);
+}
+void ui_menu_pitch_get(float& y, float& x) {
+    y = g_pitch_y.load(std::memory_order_relaxed);
+    x = g_pitch_x.load(std::memory_order_relaxed);
+}
 // A menu that has answered a tap: only then the drawn controls give way to touch (a screen of prompts, like the
 // title's "Press A", never takes a click and keeps them).
 bool ui_menu_touchable() { return ui_menu_open() && g_menu_touched.load(std::memory_order_relaxed); }

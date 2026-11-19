@@ -132,12 +132,20 @@ Open **ACNH Recomp** on the phone. The first start takes a minute or two: shader
   the screen): a tap there, with the stick not in use, presses ZL (the NookPhone). Set `NX_TRACE_TOUCH=1` to log where
   each tap landed, to find the phone icon's rectangle.
 - **Touch gestures (ACNH, test; Settings > Controls > Touch gestures)**: outside menus a vertical drag on the free part of
-  the screen is the camera and a sideways flick changes tools (d-pad left/right); in a menu a vertical drag scrolls it (d-pad
-  up/down, a step every 6% of the screen's height) and a sideways flick changes tabs (L/R); two fingers tapped together are
-  B (back); a swipe up from the bottom edge is X (pockets). "On-screen buttons: Full" (the default) shows every button; Minimal hides L, R, the d-pad and B, which these replace (island editing, photo mode and item dragging still want them).
+  the screen is the camera and a sideways flick changes tools (d-pad left/right); two fingers tapped together are B (back);
+  a swipe up from the bottom edge is X (pockets). "On-screen buttons: Full" (the default) shows every button; Minimal hides
+  L, R, the d-pad and B, which these replace (island editing, photo mode and item dragging still want them).
   "NookPhone icon > Set": press it, close the settings, tap the phone icon once: a tap there (stick not moving) presses ZL
-  and the drawn ZL hides. A menu is "a list with a cursor is up" (games/acnh/pointer.cpp, `NX_TRACE_TOUCH=1` logs it): if
-  the camera does not move in the world, or a menu does not scroll, send that log.
+  and the drawn ZL hides.
+- **Menus (ACNH, test)**: a menu is "a list with a cursor is up" (`games/acnh/pointer.cpp`, `NX_TRACE_TOUCH=1` logs it). Once
+  a menu has answered a tap the on-screen buttons hide and the whole screen is touch: a tap clicks an item, a tap outside
+  the items goes back (B), two fingers tapped are B. A drag scrolls the list: one step of the cursor for each distance
+  between the list's items (measured from the game's own layout, so the list keeps up with the finger), a quick flick
+  carries on a few steps (`input.touch_fling=0` turns that off), and in a grid (the pockets) a slow sideways drag moves along
+  a row; a quick sideways flick changes tabs (L/R). On the title screen a tap is A, a tap at the bottom left is Minus
+  (Settings; `input.touch_title=0` turns that off). The prompts that are not buttons (the "B Back" hints) cannot be tapped yet:
+  two fingers or a tap outside does that. If the camera does not move in the world, or a menu does not scroll, send the
+  `nx.log` of a run with `NX_TRACE_TOUCH=1`.
 - **Vibrate the phone (test)**: Settings > Controls > Vibrate the phone (`input.phone_vibration=1`, off by default). The game's
   vibration plays on the phone itself, only while no controller is connected. Needs the Vibration switch above on too.
 - **A controller** (Bluetooth or USB) hides the touch controls by itself while it is connected. The settings can

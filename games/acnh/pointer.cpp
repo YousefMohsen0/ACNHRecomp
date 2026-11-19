@@ -20,6 +20,7 @@ namespace nx {
 // game libraries' ABI hash (CMakeLists.txt NX_GAME_ABI): a change there makes every prepared game folder be prepared again.
 void ui_menu_seen();
 void ui_menu_touched();
+void ui_menu_pitch_set(float y, float x);
 bool ui_menu_open();
 bool ui_menu_touchable();
 
@@ -207,12 +208,37 @@ void focus_hover(CPU& c, uint64_t f) {
     set_focus(c, mgr, entry, t);
 }
 
+// How far the focused item is from its nearest enabled neighbours, below/above and beside it, in screen heights: how far
+// a finger drags the list for one step of the cursor (platform_android_input.cpp).
+void measure_pitch(uint64_t mgr, uint64_t ft) {
+    int32_t off = ld<int32_t>(mgr + 0x14);
+    const float cx0 = ld<float>(ft + 0x14a0) * kLayoutToScreen, cy0 = -ld<float>(ft + 0x14a4) * kLayoutToScreen;
+    const float w0 = ld<float>(ft + 0x14a8) * kLayoutToScreen, h0 = ld<float>(ft + 0x14ac) * kLayoutToScreen;
+    float py = 0, px = 0;
+    uint64_t node = ld<uint64_t>(mgr + 8);
+    for (int k = 0; node && node != mgr && k < 256; k++, node = ld<uint64_t>(node + 8)) {
+        uint64_t t = node - off;
+        if (t == ft || !(ld<uint32_t>(t + 0x14b0) & 1)) continue;
+        const float dx = std::fabs(ld<float>(t + 0x14a0) * kLayoutToScreen - cx0);
+        const float dy = std::fabs(-ld<float>(t + 0x14a4) * kLayoutToScreen - cy0);
+        if (dx < w0 * 0.6f + 8 && dy > 6 && dy < 400 && (!py || dy < py)) py = dy;  // the next row
+        if (dy < h0 * 0.6f + 8 && dx > 6 && dx < 600 && (!px || dx < px)) px = dx;  // the next column
+    }
+    ui_menu_pitch_set(py / 720.0f, px / 720.0f);
+    if (tracing()) {
+        static float last_y = -1, last_x = -1;
+        if (std::fabs(py - last_y) > 2 || std::fabs(px - last_x) > 2)
+            log("acnh: the cursor's neighbours: %.0f px below/above, %.0f px beside (720 px tall)", py, px), last_y = py, last_x = px;
+    }
+}
+
 // A list with a cursor on and items to pick is a menu: the touch gestures scroll it (runtime.h: ui_menu_seen).
 void note_menu(CPU& c) {
     uint64_t mgr = c.x[0];
     if (!mgr || (c.x[3] & 1) || ld<uint32_t>(mgr + 0x18) == 0) return;
     uint64_t entry = ld<uint64_t>(ld<uint64_t>(mgr + 0x20));
     if (entry && ld<uint64_t>(entry + 0x10) && has_enabled(mgr)) {
+        measure_pitch(mgr, ld<uint64_t>(entry + 0x10));
         if (tracing() && !ui_menu_open()) log("acnh: a menu is up (manager %llx)", (unsigned long long)mgr);
         ui_menu_seen();
     }
@@ -281,9 +307,22 @@ void focus_input(CPU& c) {
 // took in two frames, anywhere on the screen) presses A; with no message waiting, a click in the world does nothing.
 uint64_t g_page_turner = 0x49fc8f0;
 
+// NX_TRACE_TOUCH: the set of buttons the layout framework's handlers wait for, logged when it changes.
+void note_handler(uint32_t which) {
+    static uint64_t frame = 0;
+    static uint32_t cur = 0, shown = ~0u;
+    uint64_t f = g_frame.load();
+    if (f != frame) {
+        if (cur != shown) log("acnh: handlers wait for buttons %x (bit n: the handlers' button n)", cur), shown = cur;
+        frame = f, cur = 0;
+    }
+    if (which < 32) cur |= 1u << which;
+}
+
 void button_input(CPU& c) {
     uint64_t h = c.x[0];
     if (!h || (c.x[3] & 1) || !ld<uint8_t>(h + 0xbc)) return;
+    if (tracing()) note_handler(ld<uint32_t>(h + 0x14));
     uint64_t owner = ld<uint64_t>(h + 0x18 + 8);
     if (tracing() && owner && ld<uint64_t>(owner)) {  // which classes own the buttons that are on (porting the turner)
         static std::atomic<uint64_t> seen[32];

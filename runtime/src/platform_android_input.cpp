@@ -51,6 +51,7 @@
 // Android input: game controllers and touch (split from platform_android.cpp).
 namespace nx {
 bool ui_menu_touchable();  // hle_hid.cpp: a menu that has answered a tap
+void ui_menu_pitch_get(float& y, float& x);  // hle_hid.cpp: the focused item's distance to its neighbours, in screen heights
 bool ui_menu_open();  // hle_hid.cpp (a menu is up; not in nx/runtime.h, whose text is the ABI hash)
 }
 
@@ -78,7 +79,8 @@ struct Touch {
     float vx = 0, vy = 0; // camera: the swipe's smoothed speed (px/s), set by the moves, only read by read_pad
     uint64_t move_ns = 0; // when the last move came
     int dir = 0;          // once it moved: 1 mostly vertical (the camera, a menu's scroll), 2 mostly horizontal (a flick)
-    float sy = 0;         // a menu's scroll: where the last step was taken
+    float sy = 0, sx = 0; // a menu's scroll: where the last step was taken
+    bool stepped = false; // it scrolled a menu (steps, not a flick)
     bool pair = false;    // one of two fingers that went down together: a two-finger tap (B), not a click
 };
 std::vector<Touch> g_touches;
@@ -90,6 +92,13 @@ struct Pulse {
 };
 std::deque<Pulse> g_pulses;
 uint64_t g_pulse_end = 0;
+// A scroll stopping with the finger drops the steps that have not been pressed yet (the next press follows the last one).
+void drop_scroll_pulses(uint64_t from) {
+    std::erase_if(g_pulses, [&](const Pulse& q) {
+        return (q.button == kUp || q.button == kDown || q.button == kLeft || q.button == kRight) && q.from > from;
+    });
+    g_pulse_end = g_pulses.empty() ? 0 : g_pulses.back().until;
+}
 void pulse(uint64_t button) {
     if (g_pulses.size() >= 6) return;
     const uint64_t from = std::max(monotonic_ns(), g_pulse_end + 90'000'000);
@@ -254,6 +263,7 @@ int32_t on_input(android_app*, AInputEvent* e) {
                 nt.free = fr;
                 nt.t0_ns = monotonic_ns();
                 nt.sy = y;
+                nt.sx = x;
                 // Two fingers down together on the free part of the screen: a two-finger tap is B (back, cancel).
                 if (fr)
                     for (auto& o : g_touches)
@@ -274,15 +284,23 @@ int32_t on_input(android_app*, AInputEvent* e) {
                 if (t.id != id) continue;
                 const uint64_t tn = monotonic_ns();
                 const float dx = t.x - t.x0, dy = t.y - t.y0;
-                if (t.free && t.dir == 1)  // a menu's scroll stops with the finger, not some steps after it
-                    std::erase_if(g_pulses, [&](const Pulse& q) { return (q.button == kUp || q.button == kDown) && q.from > tn; });
+                if (t.free && t.stepped) {
+                    // A menu's scroll stops with the finger... unless it was thrown: a fast lift carries on a few steps.
+                    drop_scroll_pulses(tn);
+                    float pyf = 0, pxf = 0;
+                    nx::ui_menu_pitch_get(pyf, pxf);
+                    const float step = (pyf > 0.02f ? std::clamp(pyf, 0.04f, 0.25f) : 0.06f) * g_h;
+                    const float v = t.dir == 1 ? t.vy : 0.0f;
+                    if (t.dir == 1 && tn - t.move_ns < 90'000'000 && config_get_bool("input.touch_fling", true))
+                        for (int n = std::min(5, int(std::fabs(v) / (step * 5.0f))); n > 0; n--) pulse(v < 0 ? kDown : kUp);
+                }
                 if (t.free && t.pair && !t.moved && tn - t.t0_ns < 400'000'000) {  // two fingers tapped: B
                     if (tn - g_last_pair_ns > 400'000'000) pulse(kB), g_last_pair_ns = tn;
                     continue;
                 }
                 if (t.free && t.moved && !t.pair && config_get_bool("input.touch_gestures", true)) {
                     const bool menu = nx::ui_menu_open();
-                    if (t.dir == 2 && std::fabs(dx) > g_h * 0.10f && tn - t.t0_ns < 700'000'000) {
+                    if (t.dir == 2 && !t.stepped && std::fabs(dx) > g_h * 0.10f && tn - t.t0_ns < 700'000'000) {
                         // A flick sideways: in a menu the tabs (L, R), outside it the tools (d-pad left, right).
                         pulse(menu ? (dx > 0 ? kL : kR) : (dx > 0 ? kLeft : kRight));
                     } else if (t.dir == 1 && !menu && t.y0 > g_h * 0.88f && dy < -g_h * 0.12f) {
@@ -335,19 +353,34 @@ int32_t on_input(android_app*, AInputEvent* e) {
                         t.moved = true;
                         t.dir = std::fabs(t.x - t.x0) > std::fabs(t.y - t.y0) ? 2 : 1;
                         t.sy = t.y0;
+                        t.sx = t.x0;
                     }
-                    // In a menu a vertical drag scrolls it: a step of the d-pad every 6% of the screen's height, the
-                    // list following the finger (dragging up shows what is below).
-                    if (t.free && t.moved && t.dir == 1 && !t.pair && nx::ui_menu_open() &&
-                        config_get_bool("input.touch_gestures", true)) {
-                        const float step = g_h * 0.06f;
-                        // The list moves a step at a time (a game frame has to see each press): when the finger is
-                        // ahead of it the steps it cannot show are dropped, so it never runs on after the finger.
-                        long queued = std::count_if(g_pulses.begin(), g_pulses.end(),
-                                                    [](const Pulse& q) { return q.button == kUp || q.button == kDown; });
-                        while (std::fabs(t.y - t.sy) > step) {
-                            if (queued < 2) pulse(t.y < t.sy ? kDown : kUp), queued++;
-                            t.sy += t.y < t.sy ? -step : step;
+                    // In a menu a drag scrolls it, the list following the finger (dragging up shows what is below).
+                    if (t.free && t.moved && !t.pair && nx::ui_menu_open() && config_get_bool("input.touch_gestures", true)) {
+                        // A step of the list per distance between its items (the game's own layout, in screen heights),
+                        // so the list follows the finger; 6% of the height when that is not known. It moves a step at
+                        // a time (a game frame has to see each press): when the finger is ahead of it the steps it
+                        // cannot show are dropped, so it never runs on after the finger.
+                        float pyf = 0, pxf = 0;
+                        nx::ui_menu_pitch_get(pyf, pxf);
+                        const float stepy = (pyf > 0.02f ? std::clamp(pyf, 0.04f, 0.25f) : 0.06f) * g_h;
+                        const float stepx = std::clamp(pxf, 0.04f, 0.30f) * g_h;
+                        auto queued = [] {
+                            return std::count_if(g_pulses.begin(), g_pulses.end(), [](const Pulse& q) {
+                                return q.button == kUp || q.button == kDown || q.button == kLeft || q.button == kRight;
+                            });
+                        };
+                        if (t.dir == 1) {
+                            while (std::fabs(t.y - t.sy) > stepy) {
+                                if (queued() < 2) pulse(t.y < t.sy ? kDown : kUp), t.stepped = true;
+                                t.sy += t.y < t.sy ? -stepy : stepy;
+                            }
+                        } else if (pxf > 0.02f && monotonic_ns() - t.t0_ns > 180'000'000) {
+                            // A grid (the pockets): a slow drag sideways moves along a row too (a quick one is a flick: tabs)
+                            while (std::fabs(t.x - t.sx) > stepx) {
+                                if (queued() < 2) pulse(t.x < t.sx ? kRight : kLeft), t.stepped = true;
+                                t.sx += t.x < t.sx ? -stepx : stepx;
+                            }
                         }
                     }
                 }
