@@ -59,8 +59,23 @@ jobs:
           curl -fsSL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9.tar.gz \
             | tar -xz --strip-components=1 -C private/third_party/imgui
 
+      # The shader tool's source comes from Codeberg (SHA-256 checked by tools/build_shader_tool.py), which now and then
+      # times out from the runners: kept from the last good run, and tried again when only that download failed.
+      - name: Keep the shader tool's source
+        uses: actions/cache@v4
+        with:
+          path: private/third_party/ryubing
+          key: ryubing-${{ hashFiles('tools/build_shader_tool.py', 'tools/setup_acnh.py') }}
+
       - name: Build app APK without game files
-        run: tools/build_android.sh --no-game --jobs 2
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            if tools/build_android.sh --no-game --jobs 2 2>&1 | tee build.log; then exit 0; fi
+            grep -q "the shader tool did not build" build.log || exit 1
+            echo "::warning::the shader tool's download failed (attempt $attempt of 3)"
+          done
+          exit 1
 
       - name: Verify settings UI was compiled
         run: |
