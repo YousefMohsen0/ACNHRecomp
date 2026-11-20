@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read  # the last good build's artifact (its shader tool)
 
 jobs:
   android:
@@ -58,6 +59,32 @@ jobs:
           mkdir -p private/third_party/imgui
           curl -fsSL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9.tar.gz \
             | tar -xz --strip-components=1 -C private/third_party/imgui
+
+      # The shader tool (libspirv_harness.so) is built from Ryubing's source on Codeberg, which at times does not answer the
+      # runners. Its source only changes with tools/build_shader_tool.py and tools/setup_acnh.py: when neither changed
+      # since an earlier good build, that build's own copy of the tool (its APK) is used, and nothing is downloaded.
+      - name: Fetch the last good build
+        id: previous
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ACNHRecomp-experimental-android-arm64
+          run-id: 44648189969
+          github-token: ${{ github.token }}
+          path: previous
+
+      - name: Reuse its shader tool when its source is unchanged
+        if: steps.previous.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -e
+          prev=$(cat previous/COMMIT.txt)
+          git diff --quiet "$prev" HEAD -- tools/build_shader_tool.py tools/setup_acnh.py
+          mkdir -p previous/apk private/android-tools/shaders
+          unzip -o -q previous/ACNHRecomp-experimental.apk lib/arm64-v8a/libspirv_harness.so -d previous/apk
+          cp previous/apk/lib/arm64-v8a/libspirv_harness.so private/android-tools/shaders/spirv_harness
+          chmod +x private/android-tools/shaders/spirv_harness
+          echo "reusing the shader tool built for $prev"
 
       # The shader tool's source comes from Codeberg (SHA-256 checked by tools/build_shader_tool.py), which now and then
       # times out from the runners: kept from the last good run, and tried again when only that download failed.
