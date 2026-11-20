@@ -78,10 +78,11 @@ jobs:
         continue-on-error: true
         run: |
           set -e
-          prev=$(cat previous/COMMIT.txt)
+          find previous -type f
+          prev=$(cat "$(find previous -name COMMIT.txt | head -1)")
           git diff --quiet "$prev" HEAD -- tools/build_shader_tool.py tools/setup_acnh.py
           mkdir -p previous/apk private/android-tools/shaders
-          unzip -o -q previous/ACNHRecomp-experimental.apk lib/arm64-v8a/libspirv_harness.so -d previous/apk
+          unzip -o -q "$(find previous -name ACNHRecomp-experimental.apk | head -1)" lib/arm64-v8a/libspirv_harness.so -d previous/apk
           cp previous/apk/lib/arm64-v8a/libspirv_harness.so private/android-tools/shaders/spirv_harness
           chmod +x private/android-tools/shaders/spirv_harness
           echo "reusing the shader tool built for $prev"
@@ -97,10 +98,10 @@ jobs:
       - name: Build app APK without game files
         run: |
           set -o pipefail
-          for attempt in 1 2 3 4 5 6 7 8; do
+          for attempt in 1 2 3 4; do
             if tools/build_android.sh --no-game --jobs 2 2>&1 | tee build.log; then exit 0; fi
             grep -q "the shader tool did not build" build.log || exit 1
-            echo "::warning::the shader tool's download failed (attempt $attempt of 8)"
+            echo "::warning::the shader tool's download failed (attempt $attempt of 4)"
             sleep 90
           done
           exit 1
