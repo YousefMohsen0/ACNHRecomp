@@ -12,7 +12,7 @@ jobs:
   android:
     name: Android arm64 APK (game files excluded)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,10 +70,11 @@ jobs:
       - name: Build app APK without game files
         run: |
           set -o pipefail
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5 6 7 8; do
             if tools/build_android.sh --no-game --jobs 2 2>&1 | tee build.log; then exit 0; fi
             grep -q "the shader tool did not build" build.log || exit 1
-            echo "::warning::the shader tool's download failed (attempt $attempt of 3)"
+            echo "::warning::the shader tool's download failed (attempt $attempt of 8)"
+            sleep 90
           done
           exit 1
 
