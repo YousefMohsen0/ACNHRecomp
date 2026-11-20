@@ -150,7 +150,7 @@ Open **ACNH Recomp** on the phone. The first start takes a minute or two: shader
   the items goes back (B), two fingers tapped are B. A drag scrolls the list: one step of the cursor for each distance
   between the list's items (measured from the game's own layout, so the list keeps up with the finger), a quick flick
   carries on a few steps (`input.touch_fling=0` turns that off), and in a grid (the pockets) a slow sideways drag moves along
-  a row; a quick sideways flick changes tabs (L/R). On the title screen a tap is A, a tap at the bottom left is Minus
+  a row; a quick sideways flick changes tabs (L/R). On the title screen (until a button has been pressed and the game has taken a tap) a tap is A, a tap at the bottom left is Minus
   (Settings; `input.touch_title=0` turns that off). The prompts that are not buttons (the "B Back" hints) cannot be tapped:
   two fingers or a tap outside does that, and a long press shows the buttons (X, Y, L, R, ZL, ZR, d-pad). `NX_TRACE_TOUCH=1`
   logs, in `nx.log`, the taps, the neighbour distances of the open menu, the buttons the game's handlers wait for, and what

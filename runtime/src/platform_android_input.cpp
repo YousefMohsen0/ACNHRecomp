@@ -102,11 +102,11 @@ void drop_scroll_pulses(uint64_t from) {
     });
     g_pulse_end = g_pulses.empty() ? 0 : g_pulses.back().until;
 }
-void pulse(uint64_t button) {
+void pulse(uint64_t button, uint64_t hold_ns = 110'000'000) {
     if (g_pulses.size() >= 6) return;
     const uint64_t from = std::max(monotonic_ns(), g_pulse_end + 90'000'000);
-    g_pulses.push_back({button, from, from + 110'000'000});
-    g_pulse_end = from + 110'000'000;
+    g_pulses.push_back({button, from, from + hold_ns});
+    g_pulse_end = from + hold_ns;
 }
 std::atomic<bool> g_calibrate_phone{false};  // Settings > Controls > Set the phone icon: the next tap is its spot
 uint64_t g_last_pair_ns = 0;
@@ -375,13 +375,19 @@ int32_t on_input(android_app*, AInputEvent* e) {
                                   std::min(1.f, u + hw), std::min(1.f, v + 0.07f));
                     config_set("input.touch_phone_rect", rect);
                     nx::log("touch: the phone icon is at %s", rect);
-                } else if (!g_pressed_once && config_get_bool("input.touch_title", true)) {
-                    // The title screen's prompts are not buttons ("Press A", "- Settings"): before the first button press
-                    // of the run a tap at the bottom left is Minus (Settings), any other tap is A.
-                    pulse(u < 0.32f && v > 0.84f ? kMinus : kA);
+                } else if ((!g_pressed_once || nx::ui_tap_seq() == 0) && config_get_bool("input.touch_title", true)) {
+                    // The title screen's prompts are not buttons ("Press A", "- Settings"): until a button has been
+                    // pressed and the game has taken a tap (a list item, a message), a tap at the bottom left is Minus
+                    // (Settings), any other tap is A. (A first tap while the game was still loading used to end this
+                    // for good: the press went nowhere and the title kept answering nothing.) Held a little longer than
+                    // a gesture's press: the title reads the pad when it draws, and draws slowly.
+                    const bool settings = u < 0.32f && v > 0.84f;
+                    nx::log("touch: tap at %.2f, %.2f: %s", u, v, settings ? "title: Minus (Settings)" : "title: A");
+                    pulse(settings ? kMinus : kA, 180'000'000);
                 } else if (!stick_in_use && phone_rect(x0, y0, x1, y1) && u >= x0 && u <= x1 && v >= y0 && v <= y1) {
                     pulse(kZL);
                 } else {
+                    if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: tap at %.2f, %.2f: click (A in a moment if nothing takes it)", u, v);
                     set_mouse_touch(true, u, v);  // down and up before the next frame: still one touch (g_mouse_tap)
                     set_mouse_touch(false, u, v);
                     // In the world nothing takes it: A, once the game has had its turn (read_pad).
