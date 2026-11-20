@@ -21,6 +21,7 @@ namespace nx {
 void ui_menu_seen();
 void ui_menu_touched();
 void ui_menu_pitch_set(float y, float x);
+void ui_tap_consumed();
 bool ui_menu_open();
 bool ui_menu_touchable();
 
@@ -63,7 +64,10 @@ void acnh_gui_touch_update(uint64_t m) {
     int n = ld<int32_t>(m + 4);
     for (int k = 0; k < n && k < 16; k++) {
         uint64_t s = ld<uint64_t>(m + 8 + 8 * k);
-        if (s && ld<uint8_t>(s + 7) && ld<uint64_t>(s + 0x30)) g_gui_click_frame = g_frame.load();
+        if (s && ld<uint8_t>(s + 7) && ld<uint64_t>(s + 0x30)) {
+            g_gui_click_frame = g_frame.load();
+            ui_tap_consumed();
+        }
     }
 }
 
@@ -266,6 +270,7 @@ void focus_input(CPU& c) {
         if (g_click.until && !g_click.woke && ui_menu_touchable()) {
             if (tracing()) log("acnh: click at %u x %u on no item of the menu: B", g_click.x, g_click.y);
             hid_hold_buttons(2 /* B */, 3);
+            ui_tap_consumed();
         }
         g_click.pending = false;
         return;
@@ -283,6 +288,7 @@ void focus_input(CPU& c) {
         g_click.until = f + 45;
         if (tracing()) log("acnh: click at %u x %u on a list without a cursor: A to wake it", g_click.x, g_click.y);
         hid_hold_buttons(1 /* A */, 3);
+        ui_tap_consumed();
         return;
     }
     if (!t) {
@@ -296,6 +302,7 @@ void focus_input(CPU& c) {
     set_focus(c, mgr, entry, t);
     hid_hold_buttons(1 /* A */, 3);
     ui_menu_touched();  // this menu answers touch
+    ui_tap_consumed();
 }
 
 // ---- messages ---------------------------------------------------------------------------------------------------
@@ -351,6 +358,7 @@ void button_input(CPU& c) {
     g_click.pending = false;
     if (tracing()) log("acnh: click at %u x %u while a message waits: A", g_click.x, g_click.y);
     hid_hold_buttons(1 /* A */, 3);
+    ui_tap_consumed();
 }
 
 }  // namespace

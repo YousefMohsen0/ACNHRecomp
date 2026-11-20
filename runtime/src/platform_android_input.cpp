@@ -52,6 +52,7 @@
 namespace nx {
 bool ui_menu_touchable();  // hle_hid.cpp: a menu that has answered a tap
 void ui_menu_pitch_get(float& y, float& x);  // hle_hid.cpp: the focused item's distance to its neighbours, in screen heights
+uint64_t ui_tap_seq();  // hle_hid.cpp: how many taps something of the game has taken so far
 bool ui_menu_open();  // hle_hid.cpp (a menu is up; not in nx/runtime.h, whose text is the ABI hash)
 }
 
@@ -64,6 +65,7 @@ namespace nx::plat {
 
 namespace {
 std::mutex g_in;
+float g_w = 1, g_h = 1;  // the screen in pixels
 PadState g_pad_buttons;  // controller state
 struct Touch {
     int32_t id;
@@ -82,6 +84,7 @@ struct Touch {
     float sy = 0, sx = 0; // a menu's scroll: where the last step was taken
     bool stepped = false; // it scrolled a menu (steps, not a flick)
     bool pair = false;    // one of two fingers that went down together: a two-finger tap (B), not a click
+    bool long_fired = false;  // its long press has been answered (a menu: the deck)
 };
 std::vector<Touch> g_touches;
 // Buttons the gestures press for a moment (a tap on the phone icon -> ZL, a flick -> d-pad, two fingers -> B, ...),
@@ -108,6 +111,46 @@ void pulse(uint64_t button) {
 std::atomic<bool> g_calibrate_phone{false};  // Settings > Controls > Set the phone icon: the next tap is its spot
 uint64_t g_last_pair_ns = 0;
 bool g_pressed_once = false;  // a button has been pressed in this run: the title screen is behind us
+// A tap on the free part of the screen that nothing of the game took (no list item, no button of its touch tree, no
+// message waiting) in a moment, with no menu up, is a tap in the world: A (talk, use the tool, pick up). `seq` is
+// nx::ui_tap_seq() when the finger lifted: a taker moves it on.
+struct WorldTap {
+    bool pending = false;
+    uint64_t due = 0, seq = 0;
+};
+WorldTap g_wtap;
+// Two fingers on the free part of the screen, once they have moved: kind 1 a pinch (the camera zooms), 2 a swipe along
+// the screen (up: d-pad up, the tool ring; down: d-pad down, the tool away).
+struct TwoFingers {
+    bool active = false, done = false;
+    int kind = 0;
+    float d0 = 0, d_prev = 0, cy0 = 0, dcy = 0, vz = 0;  // their distance, where their middle was, how fast they spread (px/s)
+    uint64_t last_ns = 0;
+};
+TwoFingers g_two;
+void update_two() {
+    const Touch* a = nullptr;
+    const Touch* b = nullptr;
+    int n = 0;
+    for (const auto& t : g_touches)
+        if (t.free && t.pair) (n++ ? b : a) = &t;
+    if (n != 2) return;  // the gesture goes on until a finger lifts (read at that moment)
+    const uint64_t now = monotonic_ns();
+    const float d = std::hypot(a->x - b->x, a->y - b->y), cy = (a->y + b->y) * 0.5f;
+    if (!g_two.active) {
+        g_two = {};
+        g_two.active = true, g_two.d0 = g_two.d_prev = d, g_two.cy0 = cy, g_two.last_ns = now;
+        return;
+    }
+    const float dts = std::max(0.004f, float(now - g_two.last_ns) * 1e-9f);
+    g_two.vz = g_two.vz * 0.5f + (d - g_two.d_prev) / dts * 0.5f;
+    g_two.d_prev = d, g_two.last_ns = now, g_two.dcy = cy - g_two.cy0;
+    if (!g_two.kind) {
+        const float dd = std::fabs(d - g_two.d0), dc = std::fabs(g_two.dcy);
+        if (dd > g_h * 0.05f && dd > dc * 1.5f) g_two.kind = 1;
+        else if (dc > g_h * 0.05f && dc > dd * 1.5f) g_two.kind = 2;
+    }
+}
 
 bool is_acnh() {
     static const bool acnh = std::strcmp(nx::game::kInfo.id, "acnh") == 0;
@@ -122,7 +165,6 @@ bool native_touch() { return is_acnh() && config_get_bool("input.touch_native", 
 bool phone_rect(float& x0, float& y0, float& x1, float& y1) {
     return std::sscanf(config_get("input.touch_phone_rect", "").c_str(), "%f,%f,%f,%f", &x0, &y0, &x1, &y1) == 4;
 }
-float g_w = 1, g_h = 1;
 bool g_gamepad = false;  // the last input came from a controller: the drawn touch controls hide
 bool g_pad_connected = false;  // a controller is connected (platform_android.cpp polls the system's input devices)
 std::atomic<uint64_t> g_ui_taps{0};     // ui_taps
@@ -248,16 +290,20 @@ int32_t on_input(android_app*, AInputEvent* e) {
         g_gamepad = false;
         // The first finger of a gesture: no other is down. A touch left from one whose end was not seen here (the
         // controls turned off meanwhile) would otherwise keep its button held, or share the new finger's id.
-        if (kind == AMOTION_EVENT_ACTION_DOWN) g_touches.clear();
+        if (kind == AMOTION_EVENT_ACTION_DOWN) g_touches.clear(), g_two = {};
         size_t drawn = 0;
         touch_buttons(drawn, g_w / g_h);
         if (drawn) {  // a drawn layout (touch_layout.cpp): its buttons first, the rest of the left half is the stick
             // While a menu is up there is no layout: nothing is drawn, the whole screen is touch (taps click, drags scroll).
-            const bool in_menu = native_touch() && nx::ui_menu_touchable();
+            const bool in_menu = native_touch() && nx::ui_menu_touchable() && !touch_deck_open();
             uint64_t b = in_menu ? 0 : touch_hit(x / g_w, y / g_h, g_w / g_h);
+            if (b) touch_deck_keep();
             bool left = !in_menu && !b && (touch_mirrored() ? x > g_w * 0.5f : x < g_w * 0.5f);
             const bool fr = !b && !left && native_touch();  // the free part of the screen: taps and the camera
-            if (b || left || fr) {
+            if (b == kDeckButton) {
+                touch_deck_show(!touch_deck_open());  // the "+" handle: the buttons for a few seconds, or away again
+                if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: the buttons are %s", touch_deck_open() ? "shown" : "put away");
+            } else if (b || left || fr) {
                 g_touches.push_back({AMotionEvent_getPointerId(e, index), x, y, x, y, left, b});
                 Touch& nt = g_touches.back();
                 nt.free = fr;
@@ -294,6 +340,13 @@ int32_t on_input(android_app*, AInputEvent* e) {
                     if (t.dir == 1 && tn - t.move_ns < 90'000'000 && config_get_bool("input.touch_fling", true))
                         for (int n = std::min(5, int(std::fabs(v) / (step * 5.0f))); n > 0; n--) pulse(v < 0 ? kDown : kUp);
                 }
+                if (t.free && t.pair && t.moved && g_two.active && g_two.kind == 2 && !g_two.done &&
+                    std::fabs(g_two.dcy) > g_h * 0.12f && !nx::ui_menu_open() && config_get_bool("input.touch_gestures", true)) {
+                    // Two fingers swept along the screen: d-pad up (the tool ring) or down (the tool put away).
+                    g_two.done = true;
+                    pulse(g_two.dcy < 0 ? kUp : kDown);
+                    if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: two fingers %s", g_two.dcy < 0 ? "up: d-pad up" : "down: d-pad down");
+                }
                 if (t.free && t.pair && !t.moved && tn - t.t0_ns < 400'000'000) {  // two fingers tapped: B
                     if (tn - g_last_pair_ns > 400'000'000) pulse(kB), g_last_pair_ns = tn;
                     continue;
@@ -305,6 +358,8 @@ int32_t on_input(android_app*, AInputEvent* e) {
                         pulse(menu ? (dx > 0 ? kL : kR) : (dx > 0 ? kLeft : kRight));
                     } else if (t.dir == 1 && !menu && t.y0 > g_h * 0.88f && dy < -g_h * 0.12f) {
                         pulse(kX);  // up from the bottom edge: the pockets
+                    } else if (t.dir == 1 && !menu && t.y0 < g_h * 0.12f && dy > g_h * 0.12f) {
+                        pulse(kZL);  // down from the top edge: the NookPhone
                     }
                 }
                 if (t.id != id || t.moved || (!t.free && !t.left) || tn - t.t0_ns > 350'000'000) continue;
@@ -329,9 +384,12 @@ int32_t on_input(android_app*, AInputEvent* e) {
                 } else {
                     set_mouse_touch(true, u, v);  // down and up before the next frame: still one touch (g_mouse_tap)
                     set_mouse_touch(false, u, v);
+                    // In the world nothing takes it: A, once the game has had its turn (read_pad).
+                    if (t.free && config_get_bool("input.touch_world", true))
+                        g_wtap = {true, tn + 300'000'000, nx::ui_tap_seq()};
                 }
             }
-        if (kind == AMOTION_EVENT_ACTION_UP || kind == AMOTION_EVENT_ACTION_CANCEL) g_touches.clear();
+        if (kind == AMOTION_EVENT_ACTION_UP || kind == AMOTION_EVENT_ACTION_CANCEL) g_touches.clear(), g_two = {};
         g_touches.erase(std::remove_if(g_touches.begin(), g_touches.end(), [&](const Touch& t) { return t.id == id; }),
                         g_touches.end());
     } else if (kind == AMOTION_EVENT_ACTION_MOVE) {
@@ -385,6 +443,7 @@ int32_t on_input(android_app*, AInputEvent* e) {
                     }
                 }
         }
+        update_two();
     }
     return 1;
 }
@@ -441,8 +500,10 @@ void read_pad(PadState& p) {
             if (t.run) p.buttons |= run;
         } else {
             p.buttons |= t.button;
+            if (t.button) touch_deck_keep();  // a button of the deck in use: it stays
         }
     }
+    p.buttons &= ~kDeckButton;
     // Native touch: a finger dragged over the free part of the screen is the right stick (the camera), its speed the
     // push: its speed (smoothed over the moves, so it does not depend on the frame rate). Full push at a swipe of 1.5 screen heights a second (input.camera_sens, percent, scales that).
     float cam_x = 0, cam_y = 0;
@@ -455,6 +516,49 @@ void read_pad(PadState& p) {
         p.rx = int32_t(std::clamp(cam_x / full, -1.f, 1.f) * kStickMax);
         p.ry = int32_t(std::clamp(-cam_y * inv / full, -1.f, 1.f) * kStickMax);
         if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: camera %d, %d", p.rx, p.ry);
+    }
+    // Pinch: two fingers spreading or closing zoom the camera (the right stick, as the camera's drag); not in a menu.
+    if (native_touch() && g_two.active && g_two.kind == 1 && now - g_two.last_ns < 90'000'000 && !nx::ui_menu_open() &&
+        config_get_bool("input.touch_pinch", true)) {
+        const float full = g_h * 1.5f / (float(std::clamp(config_get_int("input.camera_sens", 100), 20, 400)) / 100.0f);
+        const float inv = config_get_bool("input.pinch_invert", false) ? -1.f : 1.f;
+        p.ry = int32_t(std::clamp(-g_two.vz * inv / full, -1.f, 1.f) * kStickMax);
+        if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: pinch %d", p.ry);
+    }
+    if (native_touch()) {
+        const bool menu = nx::ui_menu_open();
+        const bool world = !menu && config_get_bool("input.touch_world", true);
+        bool hold_a = false;
+        for (auto& t : g_touches) {
+            if (!t.free || t.moved || t.pair || now - t.t0_ns < (menu ? 550'000'000ull : 350'000'000ull)) continue;
+            if (menu) {
+                // A long press in a menu shows the buttons that have no gesture (X, Y, L, R, ZL, ZR, the d-pad): the deck.
+                if (nx::ui_menu_touchable() && !t.long_fired && !touch_deck_open()) {
+                    t.long_fired = true;
+                    touch_deck_show(true);
+                    if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: long press in a menu: the buttons are shown");
+                }
+            } else if (world) {
+                hold_a = true;  // press and hold in the world: A held (use the tool, hold to ...) until the finger lifts
+            }
+        }
+        static bool was_holding = false;
+        if (hold_a) {
+            p.buttons |= kA;
+            if (!was_holding && std::getenv("NX_TRACE_TOUCH")) nx::log("touch: long press in the world: A held");
+        }
+        was_holding = hold_a;
+        // The tap in the world (UP): if nothing of the game took it by now, it is A (the stale tap goes with it).
+        if (g_wtap.pending && now >= g_wtap.due) {
+            g_wtap.pending = false;
+            if (!menu && nx::ui_tap_seq() == g_wtap.seq && !(keyboard_state_known() && keyboard_typing())) {
+                pulse(kA);
+                uint32_t sx, sy;
+                uint64_t sf;
+                nx::touch_take_tap(sx, sy, sf);
+                if (std::getenv("NX_TRACE_TOUCH")) nx::log("touch: nothing took the tap: A");
+            }
+        }
     }
     while (!g_pulses.empty() && now >= g_pulses.front().until) g_pulses.pop_front();
     for (const auto& pl : g_pulses)
@@ -502,7 +606,7 @@ size_t touch_overlay(OverlayShape* out, size_t max) {
     const TouchButton* b = touch_buttons(n, g_w / g_h);
     if (!n) return 0;
     if (g_gamepad || !touch_enabled()) return 0;
-    if (native_touch() && nx::ui_menu_touchable()) return 0;  // a menu that answers taps: touch only, no buttons, no stick
+    if (native_touch() && nx::ui_menu_touchable() && !touch_deck_open()) return 0;  // a menu that answers taps: touch only, no buttons, no stick
     const float shade = touch_opacity_scale();
     const Touch* stick = nullptr;
     uint64_t held = 0;

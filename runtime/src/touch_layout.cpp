@@ -139,19 +139,23 @@ const TouchButton* acnh_buttons(float aspect) {
     static std::mutex lock;
     static float made_aspect = 0, made_scale = 0;
     static std::string made_layout, made_phone;
-    static bool made_swap = false, made_minimal = false;
+    static bool made_swap = false, made_minimal = false, made_native = false, made_deck = false;
     if (!(aspect > 0.5f && aspect < 5.0f)) aspect = kAcnhAspect;
     const float s = touch_size_scale();
     const std::string layout = config_get("input.touch_layout", "");
     const bool swap = config_get("input.layout", "console") == "xbox";
-    // Settings > Controls > On-screen buttons = Minimal (the default with native touch): B, L, R and the d-pad are
-    // gestures (two fingers, flicks, the stick's run), and ZL when the phone icon's spot is set (input.touch_phone_rect).
-    const bool minimal = config_get_bool("input.touch_native", true) && config_get("input.touch_buttons", "full") == "minimal";
+    // Settings > Controls > On-screen buttons: Native (the default with native touch) draws the stick, the gear and a "+"
+    // handle: everything else is a gesture (taps, long presses, flicks, two fingers, ...), and the handle shows the
+    // buttons for a few seconds (the deck). Minimal hides B, L, R and the d-pad, which gestures replace, and ZL when
+    // the phone icon's spot is set (input.touch_phone_rect). Full draws them all.
+    const bool native = touch_layout_native();
+    const bool minimal = config_get_bool("input.touch_native", true) && config_get("input.touch_buttons", "native") == "minimal";
+    const bool deck = native && touch_deck_open();
     const std::string phone = config_get("input.touch_phone_rect", "");
     std::lock_guard lk(lock);
     int c = cur.load(std::memory_order_relaxed);
     if (c >= 0 && std::fabs(made_aspect - aspect) < 1e-3f && made_scale == s && made_layout == layout &&
-        made_swap == swap && made_minimal == minimal && made_phone == phone)
+        made_swap == swap && made_minimal == minimal && made_phone == phone && made_native == native && made_deck == deck)
         return buf[c];
     const int next = c == 0 ? 1 : 0;
     const std::vector<Offset> offsets = parse_layout(layout);
@@ -168,9 +172,16 @@ const TouchButton* acnh_buttons(float aspect) {
         if (minimal && ((was == kB && !swap) || was == kL || was == kR || was == kUp || was == kDown || was == kLeft ||
                         was == kRight || (was == kZL && !phone.empty())))
             b.r = 0;  // hidden: no hit, nothing drawn (platform_android_input.cpp)
+        if (native) {
+            if (was == kPlus)
+                b.button = kDeckButton;  // the handle
+            else if (was == kMinus || (!deck && was != kSettingsButton))
+                b.r = 0;
+        }
         buf[next][k] = b;
     }
-    made_aspect = aspect, made_scale = s, made_layout = layout, made_swap = swap, made_minimal = minimal, made_phone = phone;
+    made_aspect = aspect, made_scale = s, made_layout = layout, made_swap = swap, made_minimal = minimal, made_phone = phone,
+    made_native = native, made_deck = deck;
     g_face_swapped.store(swap, std::memory_order_relaxed);
     cur.store(next, std::memory_order_release);
     return buf[next];
@@ -210,6 +221,24 @@ const std::vector<TouchButton>& wonder_buttons() {
 }
 
 }  // namespace
+
+namespace {
+std::atomic<uint64_t> g_deck_until{0};  // monotonic_ns until which the deck is shown
+constexpr uint64_t kDeckNs = 8'000'000'000;
+}  // namespace
+
+bool touch_deck_open() { return monotonic_ns() < g_deck_until.load(std::memory_order_relaxed); }
+void touch_deck_show(bool show) { g_deck_until.store(show ? monotonic_ns() + kDeckNs : 0, std::memory_order_relaxed); }
+void touch_deck_keep() {
+    if (touch_deck_open()) g_deck_until.store(monotonic_ns() + kDeckNs, std::memory_order_relaxed);
+}
+
+bool touch_layout_native() {
+    static const bool acnh = std::strcmp(game::kInfo.id, "acnh") == 0;
+    if (!acnh || !config_get_bool("input.touch_native", true)) return false;
+    const std::string mode = config_get("input.touch_buttons", "native");
+    return mode != "minimal" && mode != "full";
+}
 
 // NX_TOUCH_SHOW=0 (launcher: On-screen buttons off), or Settings > Controls > On-screen controls off (read live):
 // nothing is drawn and touches are ignored, except by the settings screen.
@@ -271,6 +300,8 @@ const char* touch_group(size_t index) {
 
 const char* touch_label(size_t index) {
     if (index >= kAcnhCount) return "";
+    // The deck's handle (the Plus place in the native layout): "+" to show the buttons, "-" to put them away.
+    if (index == 8 && touch_layout_native()) return touch_deck_open() ? "-" : "+";
     // kAcnh's first two are A and B: with the Xbox layout they trade buttons, and so letters (acnh_buttons).
     if (index < 2 && g_face_swapped.load(std::memory_order_relaxed)) return kAcnhLabels[1 - index];
     return kAcnhLabels[index];

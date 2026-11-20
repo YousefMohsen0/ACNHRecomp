@@ -1310,9 +1310,14 @@ void page_controls() {
     row("controls.touch_run", "controls.touch_run.desc", [&](float w) { toggle("input.touch_run", true, w); });
     row("controls.phone_vibration", "controls.phone_vibration.desc", [&](float w) { toggle("input.phone_vibration", false, w); });
     row("controls.touch_gestures", "controls.touch_gestures.desc", [&](float w) { toggle("input.touch_gestures", true, w); });
+    row("controls.touch_world", "controls.touch_world.desc", [&](float w) { toggle("input.touch_world", true, w); });
+    row("controls.touch_pinch", "controls.touch_pinch.desc", [&](float w) { toggle("input.touch_pinch", true, w); });
     row("controls.touch_buttons", "controls.touch_buttons.desc", [&](float w) {
-        combo("input.touch_buttons", "full",
-              {{"minimal", tr("controls.touch_buttons.minimal")}, {"full", tr("controls.touch_buttons.full")}}, w);
+        combo("input.touch_buttons", "native",
+              {{"native", tr("controls.touch_buttons.native")},
+               {"minimal", tr("controls.touch_buttons.minimal")},
+               {"full", tr("controls.touch_buttons.full")}},
+              w);
     });
     row("controls.phone_spot", "controls.phone_spot.desc", [&](float w) {
         if (button(tr("controls.phone_spot.set"), w)) plat::touch_calibrate_phone();

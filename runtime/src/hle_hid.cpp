@@ -565,6 +565,14 @@ void ui_menu_pitch_get(float& y, float& x) {
     y = g_pitch_y.load(std::memory_order_relaxed);
     x = g_pitch_x.load(std::memory_order_relaxed);
 }
+// A tap that something took (a button of the touch tree, a list item, the message window, a click outside a menu that
+// went back): the number of them so far. A tap that none took in a moment, with no menu up, is a tap in the world
+// (platform_android_input.cpp: A).
+namespace {
+std::atomic<uint64_t> g_tap_seq{0};
+}
+void ui_tap_consumed() { g_tap_seq.fetch_add(1, std::memory_order_relaxed); }
+uint64_t ui_tap_seq() { return g_tap_seq.load(std::memory_order_relaxed); }
 // A menu that has answered a tap: only then the drawn controls give way to touch (a screen of prompts, like the
 // title's "Press A", never takes a click and keeps them).
 bool ui_menu_touchable() { return ui_menu_open() && g_menu_touched.load(std::memory_order_relaxed); }

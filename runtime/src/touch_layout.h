@@ -25,6 +25,13 @@ float touch_opacity_scale();
 const char* touch_group(size_t index);
 const char* touch_label(size_t index);  // "A", "ZR", "+"; "" for the d-pad and the gear
 void touch_layout_move(const char* group, float dx, float dy, float aspect);
+// ACNH's native layout shows only the stick, the gear and a "+" handle; the handle (or a long press in a menu) shows the
+// other buttons, the deck, for a few seconds (kept alive while a finger is on one).
+bool touch_deck_open();
+void touch_deck_show(bool show);
+void touch_deck_keep();
+// Which buttons are drawn (Settings > Controls > On-screen buttons): "native" (the default with native touch), "minimal" or "full".
+bool touch_layout_native();
 // The button under (x, y) (0..1 across the screen; aspect = width / height), or 0.
 uint64_t touch_hit(float x, float y, float aspect);
 
